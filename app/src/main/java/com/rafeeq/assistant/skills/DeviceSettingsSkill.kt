@@ -96,7 +96,7 @@ class DeviceSettingsSkill(
             return openBluetoothSettings()
         }
 
-        try {
+        return try {
             val accepted = if (requestedOn) {
                 adapter.enable()
             } else {
@@ -104,12 +104,13 @@ class DeviceSettingsSkill(
             }
             val actual = adapter.isEnabled
             if (actual == requestedOn) {
-                return SkillResult.success(
+                SkillResult.success(
                     if (requestedOn) "تم تشغيل البلوتوث." else "تم إيقاف البلوتوث."
                 )
+            } else {
+                Log.w(TAG, "Bluetooth toggle ignored (accepted=$accepted, enabled=$actual, requested=$requestedOn)")
+                openBluetoothSettings()
             }
-            Log.w(TAG, "Bluetooth toggle ignored (accepted=$accepted, enabled=$actual, requested=$requestedOn)")
-            openBluetoothSettings()
         } catch (e: SecurityException) {
             Log.e(TAG, "BLUETOOTH_CONNECT missing or restricted", e)
             SkillResult.permissionRequired(

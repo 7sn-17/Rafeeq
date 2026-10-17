@@ -56,6 +56,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -524,8 +525,11 @@ private fun DrawerItem(
     label: String,
     onClick: () -> Unit
 ) {
+    // `selected` has no default in the Material 3 signature; these drawer entries are
+    // one-shot actions rather than persistent destinations, so none of them is ever active.
     NavigationDrawerItem(
         label = { Text(label) },
+        selected = false,
         icon = { Icon(icon, contentDescription = label) },
         onClick = onClick,
         modifier = Modifier.padding(horizontal = 12.dp)

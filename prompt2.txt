@@ -1,0 +1,21 @@
+Excellent! v0.1 is installed and running perfectly. Now we are building v0.2: The Brain & UI Polish. This is a major upgrade. Please implement the following and DO NOT attempt to build locally:
+
+1. Secure Gemini API Setup:
+   · Modify app/build.gradle.kts to read the GEMINI_API_KEY from local.properties (using Properties() in Gradle).
+   · Add buildConfigField("String", "GEMINI_API_KEY", "\"${properties["GEMINI_API_KEY"]}\"") so we can access it securely in Kotlin.
+   · Enable the buildConfig feature.
+   · Add the official Google Generative AI dependency: implementation("com.google.ai.client.generativeai:generativeai:0.7.0") (or the latest stable version).
+2. Gemini Service (GeminiService.kt):
+   · Create a class that initializes the GenerativeModel using BuildConfig.GEMINI_API_KEY.
+   · Create a suspend function analyzeIntent(userSpeech: String): String. It should send a prompt to Gemini: 'You are Rafeeq, an Arabic smart assistant. Analyze this user command: "[user speech]". If the user wants to organize images, return exactly: {"intent": "ORGANIZE_IMAGES", "sort_by": "date"} or "size". If you don't understand, return {"intent": "UNKNOWN"}. Return ONLY valid JSON.'
+3. Skill Manager (SkillManager.kt):
+   · Create a class to route the JSON response. If intent is "ORGANIZE_IMAGES", call OrganizeImagesSkill and pass the sort_by parameter.
+4. Text-to-Speech (TtsManager.kt):
+   · Create a simple wrapper around Android's TextToSpeech to let Rafeeq speak back to the user (e.g., 'جاري تنظيم الصور حسب التاريخ' or 'عذراً، لم أفهم طلبك').
+5. UI & State Management Upgrade (Compose):
+   · Update MainViewModel.kt to include a StateFlow for AssistantState (IDLE, LISTENING, PROCESSING, SUCCESS, ERROR).
+   · Update MainScreen.kt to have a modern, beautiful design (use Material3, a nice gradient background, and center everything).
+   · Create an Animated Microphone Button. When LISTENING, it should pulse continuously (using rememberInfiniteTransition). When PROCESSING, show a CircularProgressIndicator.
+   · Display the recognized text and the AI's response nicely on the screen.
+
+Ensure all imports are correct and the code is clean. Once done, tell me to push.

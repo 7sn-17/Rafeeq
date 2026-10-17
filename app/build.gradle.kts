@@ -31,7 +31,9 @@ android {
             storeFile = file("../release.p12")
             storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "hasan3522"
             keyAlias = System.getenv("KEY_ALIAS") ?: "rafeeq"
-            keyPassword = System.getenv("KEY_PASSWORD") ?: "RafeeqPassword123"
+            // A PKCS12 keystore stores the private key under the same password as the
+            // keystore itself, so this must match storePassword above.
+            keyPassword = System.getenv("KEY_PASSWORD") ?: "hasan3522"
         }
     }
 

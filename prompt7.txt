@@ -1,0 +1,27 @@
+We have a critical issue: The `AndroidManifest.xml` file is EMPTY on GitHub, which causes "Parse Error" when installing the APK. We must fix this and correct the signing configuration.
+
+1. **Recreate AndroidManifest.xml (CRITICAL)**:
+   - Overwrite `app/src/main/AndroidManifest.xml` with the correct content. It must include:
+     - The `<manifest>` root tag with `xmlns:android`.
+     - All necessary permissions: `RECORD_AUDIO`, `READ_MEDIA_IMAGES`, `READ_EXTERNAL_STORAGE` (maxSdkVersion=32), `READ_CONTACTS`, `CALL_PHONE`, `SEND_SMS`, `BLUETOOTH_CONNECT`, `INTERNET`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MICROPHONE`, `POST_NOTIFICATIONS`, `MODIFY_AUDIO_SETTINGS`.
+     - The `<queries>` block for TTS, DIAL, SENDTO, and WhatsApp packages.
+     - The `<application>` tag with `android:label="رفيق"`, `android:icon="@mipmap/ic_launcher"`, `android:theme="@style/Theme.Rafeeq"`.
+     - The `<activity>` for `MainActivity` with `android:exported="true"` and the LAUNCHER intent filter.
+     - The `<service>` for `RafeeqBackgroundService` with `android:foregroundServiceType="microphone"`.
+
+2. **Fix Signing Configuration in `app/build.gradle.kts`**:
+   - Change the `keyPassword` default value to `"hasan3522"` to match `storePassword`. (PKCS12 keystores use the same password for both).
+   - Ensure `storeType = "PKCS12"` is present.
+
+3. **Improve CI Verification in `.github/workflows/build.yml`**:
+   - After the "Decode Keystore" step, add a step to verify the keystore before building:
+     ```yaml
+     - name: Verify Keystore
+       run: keytool -list -keystore release.p12 -storepass hasan3522 -alias rafeeq
+     ```
+   - This will fail early if the keystore is corrupted or the password is wrong, saving time.
+
+4. **Finalize**:
+   - Do NOT build locally.
+   - Commit with the message: "إصلاح جذري: إعادة إنشاء AndroidManifest.xml وتصحيح توقيع التطبيق".
+   - Push to GitHub.

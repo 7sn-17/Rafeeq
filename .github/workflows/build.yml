@@ -26,6 +26,11 @@ jobs:
       - name: Decode Keystore
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.p12
 
+      # Fails fast on a corrupt keystore, a wrong store password, or a bad alias, so a
+      # signing problem surfaces here with a clear message instead of deep inside Gradle.
+      - name: Verify Keystore
+        run: keytool -list -keystore release.p12 -storepass hasan3522 -alias rafeeq
+
       - name: Build debug APK
         run: ./gradlew assembleDebug
         env:

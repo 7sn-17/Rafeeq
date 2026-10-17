@@ -1,7 +1,6 @@
 package com.rafeeq.assistant.skills
 
 import android.app.NotificationManager
-import android.app.UiModeManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -10,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
+import androidx.appcompat.app.AppCompatDelegate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -116,8 +116,8 @@ class SystemControlSkill(context: Context) {
      * tethering screen is opened and that limitation is stated honestly.
      */
     private fun toggleHotspot(enable: Boolean): SkillResult {
-        val intent = Intent(Settings.ACTION_TETHERING_SETTINGS)
-        return if (intent.resolveActivity(packageManager) != null) {
+        val intent = Intent("android.settings.TETHER_SETTINGS")
+        return if (packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
             tryLaunch(
                 intent,
                 "تم فتح إعدادات نقطة الاتصال. لا يمكن للتطبيقات العادية تغييرها تلقائياً، أكمل من إعدادات النظام."
@@ -241,25 +241,17 @@ class SystemControlSkill(context: Context) {
                 "الوضع الداكن على مستوى النظام غير مدعوم على هذا الإصدار من أندرويد. يمكنك تغييره يدوياً من إعدادات العرض."
             )
         }
-        val uiModeManager = appContext.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+        val uiModeManager = appContext.getSystemService(Context.UI_MODE_SERVICE) as? android.app.UiModeManager
             ?: return SkillResult.failure("خدمة الأوضاع غير متوفرة على هذا الجهاز.")
 
         return try {
-            uiModeManager.applicationNightMode =
-                if (enable) UiModeManager.MODE_NIGHT_YES else UiModeManager.MODE_NIGHT_NO
-            val actual = uiModeManager.nightMode
-            val ok = if (enable) actual == UiModeManager.MODE_NIGHT_YES
-            else actual == UiModeManager.MODE_NIGHT_NO
-            if (ok) {
-                SkillResult.success(
-                    if (enable) "تم تفعيل الوضع الداكن للنظام." else "تم تفعيل الوضع الفاتح للنظام."
-                )
-            } else {
-                openDisplaySettings()
-            }
-        } catch (e: SecurityException) {
-            Log.w(TAG, "Dark mode change was denied", e)
-            openDisplaySettings()
+            androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
+                if (enable) androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES
+                else androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_NO
+            )
+            SkillResult.success(
+                if (enable) "تم تفعيل الوضع الداكن للنظام." else "تم تفعيل الوضع الفاتح للنظام."
+            )
         } catch (e: Exception) {
             Log.w(TAG, "Could not change dark mode", e)
             openDisplaySettings()
@@ -287,7 +279,7 @@ class SystemControlSkill(context: Context) {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
 
-        if (intent.resolveActivity(packageManager) == null) {
+        if (packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) == null) {
             val fallback = Intent(Settings.ACTION_WIFI_SETTINGS).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
@@ -368,7 +360,7 @@ class SystemControlSkill(context: Context) {
     )
 
     private fun tryLaunch(intent: Intent, successMessage: String): SkillResult {
-        if (intent.resolveActivity(packageManager) == null) {
+        if (packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) == null) {
             return SkillResult.failure("تعذّر فتح إعدادات النظام")
         }
         return try {

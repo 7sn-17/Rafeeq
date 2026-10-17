@@ -186,7 +186,7 @@ class CommunicationSkill(
         val uri = if (exactOnly) {
             ContactsContract.CommonDataKinds.Phone.CONTENT_URI.buildUpon()
                 .appendQueryParameter(
-                    ContactsContract.CommonDataKinds.Phone.QUERY_PARAMETER_ADDRESS_PHONE_NUMBER,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER,
                     query
                 )
                 .build()

@@ -41,9 +41,7 @@ class MainActivity : ComponentActivity() {
     private val multiPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
-        result.forEach { (permission, granted) ->
-            mainViewModel.onPermissionResult(permission, granted)
-        }
+        mainViewModel.onPermissionResult(result)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,8 +56,9 @@ class MainActivity : ComponentActivity() {
 
         // Skills (e.g. the image organiser) request their permissions through the
         // multiple-permission launcher, whose results are routed back to SkillManager.
-        mainViewModel.setSkillPermissionRequester { permission ->
-            multiPermissionLauncher.launch(arrayOf(permission))
+        // Skill permissions are driven from Compose via the ViewModel's StateFlows.
+        mainViewModel.setSkillPermissionRequester { permissions ->
+            multiPermissionLauncher.launch(arrayOf<String>(*permissions.toTypedArray()))
         }
 
         requestNotificationPermissionIfNeeded()
@@ -104,18 +103,25 @@ class MainActivity : ComponentActivity() {
                         val messages by mainViewModel.messages.collectAsStateWithLifecycle()
                         val statusText by mainViewModel.statusText.collectAsStateWithLifecycle()
                         val ttsMuted by mainViewModel.ttsMuted.collectAsStateWithLifecycle()
+                        val pendingPermission by mainViewModel.pendingPermissionRequest.collectAsStateWithLifecycle()
+                        val pendingConfirmation by mainViewModel.pendingConfirmation.collectAsStateWithLifecycle()
 
                         MainScreen(
                             state = state,
                             messages = messages,
                             statusText = statusText,
                             ttsMuted = ttsMuted,
+                            pendingPermission = pendingPermission,
+                            pendingConfirmation = pendingConfirmation,
                             onSendText = mainViewModel::sendText,
                             onToggleMic = mainViewModel::toggleRecording,
                             onToggleMute = mainViewModel::toggleTtsMuted,
                             onNewChat = mainViewModel::newChat,
                             onClearHistory = mainViewModel::clearHistory,
-                            onOpenSettings = { showSettings = true }
+                            onOpenSettings = { showSettings = true },
+                            onPermissionShown = mainViewModel::onPermissionDialogShown,
+                            onPermissionResult = mainViewModel::onPermissionResult,
+                            onConfirmationResult = mainViewModel::onConfirmationResult
                         )
                     }
                 }
@@ -130,7 +136,7 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.POST_NOTIFICATIONS
         ) == PackageManager.PERMISSION_GRANTED
         if (!granted) {
-            multiPermissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+            multiPermissionLauncher.launch(arrayOf<String>(Manifest.permission.POST_NOTIFICATIONS))
         }
     }
 

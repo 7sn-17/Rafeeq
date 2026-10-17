@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.os.Build
 import android.provider.Settings
@@ -80,7 +81,6 @@ class DeviceSettingsSkill(
     }
 
     @Suppress("DEPRECATION")
-    @Suppress("DEPRECATION")
     private fun changeBluetooth(state: String): SkillResult {
         val adapter = bluetoothAdapter ?: return SkillResult.failure("جهاز البلوتوث غير متوفر على هذا الجهاز.")
 
@@ -126,8 +126,8 @@ class DeviceSettingsSkill(
         val intent = Intent(Settings.ACTION_BLUETOOTH_SETTINGS).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        return if (intent.resolveActivity(appContext.packageManager) != null) {
-            try {
+        if (appContext.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
+            return try {
                 appContext.startActivity(intent)
                 SkillResult.screenOpened("تم فتح إعدادات البلوتوث. أكمل التغيير من إعدادات النظام.")
             } catch (e: ActivityNotFoundException) {
@@ -137,9 +137,8 @@ class DeviceSettingsSkill(
                 Log.e(TAG, "Launching Bluetooth Settings was blocked", e)
                 SkillResult.userActionRequired("لا يمكن فتح إعدادات البلوتوث تلقائياً من هنا.")
             }
-        } else {
-            SkillResult.failure("تعذّر فتح إعدادات البلوتوث")
         }
+        return SkillResult.failure("تعذّر فتح إعدادات البلوتوث")
     }
 
     companion object {

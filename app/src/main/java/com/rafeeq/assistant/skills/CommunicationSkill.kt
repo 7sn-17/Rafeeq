@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.ContactsContract
 import android.util.Log
-import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -14,13 +13,12 @@ class CommunicationSkill(context: Context) {
     private val appContext = context.applicationContext
 
     suspend fun callContact(name: String): SkillResult = withContext(Dispatchers.Main) {
-        val contactUri = findContactPhone(name)
-        if (contactUri == null) {
+        val phone = findContactPhoneNumber(name)
+        if (phone.isNullOrBlank()) {
             return@withContext SkillResult("عذراً، لم أجد جهة الاتصال \"$name\"", success = false)
         }
         try {
-            val intent = Intent(Intent.ACTION_DIAL).apply {
-                data = contactUri
+            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(phone)}")).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             appContext.startActivity(intent)
@@ -54,34 +52,12 @@ class CommunicationSkill(context: Context) {
         }
     }
 
-    private suspend fun findContactPhone(name: String): Uri? = withContext(Dispatchers.IO) {
-        val uri = Uri.withAppendedPath(
-            ContactsContract.Contacts.CONTENT_FILTER_URI,
-            Uri.encode(name)
-        )
-        appContext.contentResolver.query(
-            uri,
-            arrayOf(ContactsContract.Contacts._ID, ContactsContract.Contacts.HAS_PHONE_NUMBER),
-            null,
-            null,
-            null
-        )?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val id = cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.Contacts._ID))
-                val hasPhone = cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.Contacts.HAS_PHONE_NUMBER)) == "1"
-                if (hasPhone) {
-                    return@use Uri.parse("tel:$id")
-                }
-            }
-        }
-        null
-    }
-
     private suspend fun findContactPhoneNumber(name: String): String? = withContext(Dispatchers.IO) {
         val uri = Uri.withAppendedPath(
             ContactsContract.Contacts.CONTENT_FILTER_URI,
             Uri.encode(name)
         )
+        var phoneNumber: String? = null
         appContext.contentResolver.query(
             uri,
             arrayOf(ContactsContract.Contacts._ID),
@@ -98,19 +74,16 @@ class CommunicationSkill(context: Context) {
                     arrayOf(id),
                     null
                 )?.use { phoneCursor ->
-                    if (phoneCursor.moveToFirst()) {
-                        return phoneCursor.getString(phoneCursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER))
+                    if (phoneCursor.moveToFirst() && phoneNumber == null) {
+                        phoneNumber = phoneCursor.getString(
+                            phoneCursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                        )
                     }
                 }
             }
         }
-        null
+        phoneNumber
     }
-
-    private fun hasContactsPermission(): Boolean = ContextCompat.checkSelfPermission(
-        appContext,
-        android.Manifest.permission.READ_CONTACTS
-    ) == PackageManager.PERMISSION_GRANTED
 
     companion object {
         const val TAG = "CommunicationSkill"

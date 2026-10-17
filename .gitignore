@@ -9,3 +9,9 @@
 .cxx
 local.properties
 app/build
+
+# Local agent/opencode tooling (not part of the Android project)
+node_modules/
+package.json
+package-lock.json
+.code-agent-auto-commit.json

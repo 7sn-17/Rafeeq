@@ -3,8 +3,6 @@ package com.rafeeq.assistant.ai
 import android.util.Log
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.FunctionCallingConfig
-import com.google.ai.client.generativeai.type.FunctionCallingMode
-import com.google.ai.client.generativeai.type.GenerationConfig
 import com.google.ai.client.generativeai.type.Schema
 import com.google.ai.client.generativeai.type.Tool
 import com.google.ai.client.generativeai.type.ToolConfig
@@ -31,7 +29,7 @@ class GeminiService {
                 modelName = MODEL_NAME,
                 apiKey = apiKey,
                 tools = listOf(Tool(rafeeqTools)),
-                toolConfig = ToolConfig(FunctionCallingConfig(FunctionCallingMode.AUTO)),
+                toolConfig = ToolConfig(FunctionCallingConfig(FunctionCallingConfig.Mode.AUTO)),
                 systemInstruction = content {
                     text(
                         "أنت رفيق، مساعد صوتي ذكي باللغة العربية. " +

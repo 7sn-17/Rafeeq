@@ -23,8 +23,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -45,7 +43,6 @@ import androidx.compose.ui.unit.sp
 import com.rafeeq.assistant.R
 import com.rafeeq.assistant.core.AssistantState
 import com.rafeeq.assistant.core.ChatMessage
-import com.rafeeq.assistant.skills.ProcessingState
 
 private val ScreenGradient = listOf(
     Color(0xFF0F1E4B),

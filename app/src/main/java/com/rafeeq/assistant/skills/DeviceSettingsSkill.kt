@@ -3,6 +3,7 @@ package com.rafeeq.assistant.skills
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.os.Build
 import android.util.Log

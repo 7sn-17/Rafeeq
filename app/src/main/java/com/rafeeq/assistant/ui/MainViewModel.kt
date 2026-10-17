@@ -1,7 +1,6 @@
 package com.rafeeq.assistant.ui
 
 import android.app.Application
-import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.rafeeq.assistant.core.AssistantEngine

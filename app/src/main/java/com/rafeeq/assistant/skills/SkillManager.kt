@@ -1,6 +1,5 @@
 package com.rafeeq.assistant.skills
 
-import android.Manifest
 import android.util.Log
 import com.rafeeq.assistant.permissions.PermissionsManager
 import kotlinx.coroutines.CoroutineScope

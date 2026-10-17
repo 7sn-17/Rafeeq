@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">المساعد الصوتي</string>
+
+    <!-- Main screen -->
+    <string name="assistant_ready">المساعد جاهز</string>
+    <string name="listen">استمع</string>
+
+    <!-- Status messages -->
+    <string name="status_ready">المساعد جاهز</string>
+    <string name="status_listening">جارٍ الاستماع…</string>
+    <string name="status_processing">جارٍ المعالجة…</string>
+    <string name="status_permission_denied">تم رفض إذن الميكروفون</string>
+    <string name="status_recognition_unavailable">خدمة التعرف على الصوت غير متوفرة على هذا الجهاز</string>
+    <string name="status_no_command">لم يتم التعرف على أي أمر</string>
+    <string name="status_recognized_prefix">تم التعرف على: </string>
+    <string name="status_moved_format">تم تنظيم %1$d صورة</string>
+</resources>

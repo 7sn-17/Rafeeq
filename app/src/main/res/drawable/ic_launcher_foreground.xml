@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Microphone body -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,30.5c-3.59,0 -6.5,2.91 -6.5,6.5v14c0,3.59 2.91,6.5 6.5,6.5s6.5,-2.91 6.5,-6.5V37c0,-3.59 -2.91,-6.5 -6.5,-6.5z" />
+    <!-- Microphone stand / base -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M67,50.5v0.5c0,7.18 -5.82,13 -13,13s-13,-5.82 -13,-13h-4c0,8.9 6.86,16.24 15.6,17.32V75h4v-6.68C65.14,67.24 72,59.9 72,51h-5z" />
+</vector>

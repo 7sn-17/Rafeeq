@@ -1,0 +1,15 @@
+Create a new Android project in Kotlin using Jetpack Compose. This will be the foundation (v0.1) for a voice-activated personal assistant. Please implement the following with a focus on clean architecture and extensibility:
+
+1. Project Structure: Set up a standard single-module Android project using Kotlin DSL (build.gradle.kts, settings.gradle.kts). Use compileSdk 34 and minSdk 26. Include necessary dependencies for Jetpack Compose, Lifecycle, and Coroutines.
+2. Permissions: In AndroidManifest.xml, request RECORD_AUDIO and READ_MEDIA_IMAGES (for Android 13+). Also, include the legacy READ_EXTERNAL_STORAGE with maxSdkVersion="32".
+3. UI Layer: Create a simple screen (MainScreen.kt) with a Text showing 'المساعد جاهز' (Assistant Ready) and a Button labeled 'استمع' (Listen). Clicking the button should trigger the speech recognizer.
+4. Speech Recognition: Use Android's built-in SpeechRecognizer. Create a VoiceRecognitionManager class that starts listening when the button is clicked, handles the RECORD_AUDIO permission request at runtime, and returns the recognized text as a Flow<String> or via a callback.
+5. Core Skill (The First Feature): Implement a class OrganizeImagesSkill. When the recognized text contains the phrase 'نظم الصور' (organize images) or 'رتّب الصور' (sort photos), this skill should execute. It should:
+   · Query the MediaStore for all images.
+   · Create sub-directories in the Pictures folder based on the image's creation date (e.g., Pictures/Sorted/2026-10-17/).
+   · Move each image file into its corresponding date-based folder.
+   · Log the number of moved images to Logcat.
+6. Architecture: Connect the UI to the logic using a ViewModel (MainViewModel.kt). The ViewModel will hold the state (e.g., 'Listening...', 'Processing...') and call the VoiceRecognitionManager and OrganizeImagesSkill.
+7. GitHub Actions: Create a .github/workflows/build.yml file that triggers on push to main, sets up JDK 17, and runs ./gradlew assembleDebug to build the APK. Upload the APK as an artifact.
+
+Please generate all necessary files (MainActivity.kt, MainScreen.kt, MainViewModel.kt, VoiceRecognitionManager.kt, OrganizeImagesSkill.kt, AndroidManifest.xml, build.gradle.kts, etc.). Do not add any extra features beyond this scope. The goal is a working, buildable APK.

@@ -1,18 +1,7 @@
-import java.util.Properties
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
-}
-
-// API keys live in local.properties (which is never committed) so they stay
-// out of version control, out of the APK sources and out of the build scripts.
-val properties = Properties().apply {
-    val localPropertiesFile = rootProject.file("local.properties")
-    if (localPropertiesFile.exists()) {
-        localPropertiesFile.inputStream().use { load(it) }
-    }
 }
 
 android {
@@ -23,11 +12,17 @@ android {
         applicationId = "com.rafeeq.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.3.5"
+        versionCode = 5
+        versionName = "0.4"
 
-        // Exposed to Kotlin as BuildConfig.GROQ_API_KEY (Groq, OpenAI-compatible).
-        buildConfigField("String", "GROQ_API_KEY", "\"${properties["GROQ_API_KEY"] ?: ""}\"")
+        // Injected from CI (GitHub Actions secret -> environment variable). Reading the key
+        // from the environment rather than local.properties means a CI runner never needs a
+        // file that is absent from the checkout, so assembleDebug can actually sign & build.
+        buildConfigField(
+            "String",
+            "GROQ_API_KEY",
+            "\"${System.getenv("GROQ_API_KEY") ?: ""}\""
+        )
     }
 
     signingConfigs {

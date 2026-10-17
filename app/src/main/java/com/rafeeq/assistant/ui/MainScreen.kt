@@ -11,173 +11,432 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.rafeeq.assistant.BuildConfig
 import com.rafeeq.assistant.R
 import com.rafeeq.assistant.core.AssistantState
 import com.rafeeq.assistant.core.ChatMessage
+import com.rafeeq.assistant.core.MessageRole
+import com.rafeeq.assistant.ui.theme.rafeeqHeaderGradient
+import kotlinx.coroutines.launch
 
-private val ScreenGradient = listOf(
-    Color(0xFF0F1E4B),
-    Color(0xFF1E3A8A),
-    Color(0xFF0E7490)
-)
-
-private val MicrophoneGradient = listOf(
-    Color(0xFF4A6BFF),
-    Color(0xFF2AC1FF)
-)
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
     state: AssistantState,
     messages: List<ChatMessage>,
-    errorMessage: String,
-    onListenClick: () -> Unit,
+    statusText: String?,
+    ttsMuted: Boolean,
+    onSendText: (String) -> Unit,
+    onToggleMic: () -> Unit,
+    onToggleMute: () -> Unit,
+    onNewChat: () -> Unit,
+    onClearHistory: () -> Unit,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    var showAbout by remember { mutableStateOf(false) }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            AppDrawer(
+                onNewChat = {
+                    scope.launch { drawerState.close() }
+                    onNewChat()
+                },
+                onClearHistory = {
+                    scope.launch { drawerState.close() }
+                    onClearHistory()
+                },
+                onOpenSettings = {
+                    scope.launch { drawerState.close() }
+                    onOpenSettings()
+                },
+                onAbout = {
+                    scope.launch { drawerState.close() }
+                    showAbout = true
+                }
+            )
+        },
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            ChatHeader(
+                ttsMuted = ttsMuted,
+                onMenuClick = { scope.launch { drawerState.open() } },
+                onToggleMute = onToggleMute
+            )
+
+            ChatList(
+                messages = messages,
+                statusText = statusText,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            )
+
+            InputBar(
+                isRecording = state == AssistantState.LISTENING,
+                isBusy = state == AssistantState.PROCESSING || state == AssistantState.ANALYZING,
+                onSendText = onSendText,
+                onToggleMic = onToggleMic
+            )
+        }
+    }
+
+    if (showAbout) {
+        AboutDialog(onDismiss = { showAbout = false })
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChatHeader(
+    ttsMuted: Boolean,
+    onMenuClick: () -> Unit,
+    onToggleMute: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(rafeeqHeaderGradient())
+    ) {
+        TopAppBar(
+            modifier = Modifier.statusBarsPadding(),
+            title = {
+                Text(text = "رفيق", fontWeight = FontWeight.Bold, color = Color.White)
+            },
+            navigationIcon = {
+                IconButton(onClick = onMenuClick) {
+                    Icon(
+                        imageVector = Icons.Filled.Menu,
+                        contentDescription = "القائمة",
+                        tint = Color.White
+                    )
+                }
+            },
+            actions = {
+                IconButton(onClick = onToggleMute) {
+                    Icon(
+                        painter = volumePainter(ttsMuted),
+                        contentDescription = if (ttsMuted) "تشغيل الصوت" else "كتم الصوت",
+                        tint = Color.White
+                    )
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+        )
+    }
+}
+
+@Composable
+private fun volumePainter(ttsMuted: Boolean): Painter =
+    painterResource(id = if (ttsMuted) R.drawable.ic_volume_off else R.drawable.ic_volume_on)
+
+@Composable
+private fun ChatList(
+    messages: List<ChatMessage>,
+    statusText: String?,
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
-    // The trailing item is the optional inline error bubble, so include it in the count.
-    val itemCount = messages.size + if (errorMessage.isNotEmpty()) 1 else 0
+    val showTyping = statusText != null
+    // The typing indicator occupies a trailing slot, so include it when counting.
+    val itemCount = messages.size + if (showTyping) 1 else 0
+
     LaunchedEffect(itemCount) {
         if (itemCount > 0) {
             listState.animateScrollToItem(itemCount - 1)
         }
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Brush.verticalGradient(ScreenGradient)),
-        contentAlignment = Alignment.TopCenter
+    LazyColumn(
+        state = listState,
+        modifier = modifier.padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(vertical = 12.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = "رفيق",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(messages) { message ->
-                    ChatBubble(message = message)
-                }
-                if (errorMessage.isNotEmpty()) {
-                    item {
-                        ChatBubble(ChatMessage(errorMessage, isUser = false))
-                    }
-                }
+        items(messages) { message ->
+            ChatBubble(message = message)
+        }
+        if (showTyping) {
+            item {
+                ThinkingIndicator(text = statusText.orEmpty())
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            ProcessingStatus(state = state)
-            Spacer(modifier = Modifier.height(16.dp))
-            MicrophoneButton(state = state, onListenClick = onListenClick)
-            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
 
 @Composable
 fun ChatBubble(message: ChatMessage) {
+    if (message.role == MessageRole.SYSTEM) {
+        SystemBubble(text = message.text)
+        return
+    }
+
+    val isUser = message.role == MessageRole.USER
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
     ) {
         Surface(
-            modifier = Modifier.padding(horizontal = 4.dp),
-            color = if (message.isUser) Color(0xFF4A6BFF) else Color(0xFF1E293B),
+            color = if (isUser) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant
+            },
+            contentColor = if (isUser) {
+                MaterialTheme.colorScheme.onPrimary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
             shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = if (message.isUser) 16.dp else 4.dp,
-                bottomEnd = if (message.isUser) 4.dp else 16.dp
-            )
+                topStart = 24.dp,
+                topEnd = 24.dp,
+                bottomStart = if (isUser) 24.dp else 6.dp,
+                bottomEnd = if (isUser) 6.dp else 24.dp
+            ),
+            modifier = Modifier
+                .padding(horizontal = 4.dp)
+                .widthIn(max = 300.dp)
         ) {
             Text(
                 text = message.text,
-                color = Color.White,
                 fontSize = 16.sp,
-                modifier = Modifier.padding(12.dp),
-                textAlign = TextAlign.Start
+                textAlign = TextAlign.Start,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+            )
+        }
+    }
+}
+
+/** Quiet centred line recording which skill is running right now. */
+@Composable
+private fun SystemBubble(text: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    strokeWidth = 2.dp
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(text = text, fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+/** Shown while the model is thinking: three bouncing dots plus the current progress line. */
+@Composable
+private fun ThinkingIndicator(text: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
+            ) {
+                BouncingDots()
+                if (text.isNotEmpty()) {
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(text = text, fontSize = 14.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BouncingDots() {
+    val transition = rememberInfiniteTransition(label = "dots")
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        repeat(3) { index ->
+            val offsetY by transition.animateFloat(
+                initialValue = 0f,
+                targetValue = -6f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween<Float>(
+                        durationMillis = 320,
+                        delayMillis = index * 140,
+                        easing = FastOutSlowInEasing
+                    ),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "dot$index"
+            )
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .offset(y = offsetY.dp)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape)
             )
         }
     }
 }
 
 @Composable
-fun ProcessingStatus(state: AssistantState) {
-    val text = when (state) {
-        AssistantState.ANALYZING -> "جاري التحليل..."
-        AssistantState.SEARCHING_FILES -> "جاري البحث عن الصور..."
-        AssistantState.MOVING_FILES -> "جاري نقل الصور..."
-        AssistantState.COMPLETED -> "تم الإنتهاء"
-        AssistantState.PROCESSING -> "جاري المعالجة..."
-        AssistantState.LISTENING -> "يستمع..."
-        else -> ""
-    }
-    if (text.isNotEmpty()) {
-        Text(
-            text = text,
-            color = Color.White.copy(alpha = 0.9f),
-            fontSize = 14.sp,
-            textAlign = TextAlign.Center
-        )
+private fun InputBar(
+    isRecording: Boolean,
+    isBusy: Boolean,
+    onSendText: (String) -> Unit,
+    onToggleMic: () -> Unit
+) {
+    var text by rememberSaveable { mutableStateOf("") }
+    val canSend = text.isNotBlank() && !isBusy
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        tonalElevation = 3.dp,
+        shadowElevation = 8.dp
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+        ) {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("اكتب رسالتك هنا...") },
+                shape = RoundedCornerShape(24.dp),
+                maxLines = 4
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            MicButton(
+                isRecording = isRecording,
+                isBusy = isBusy,
+                onClick = onToggleMic
+            )
+
+            Spacer(modifier = Modifier.width(4.dp))
+
+            IconButton(
+                enabled = canSend,
+                onClick = {
+                    if (canSend) {
+                        onSendText(text)
+                        text = ""
+                    }
+                }
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Send,
+                    contentDescription = "إرسال",
+                    tint = if (canSend) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+                    }
+                )
+            }
+        }
     }
 }
 
+/** Mic toggle; pulses red while a recording is in progress. */
 @Composable
-fun MicrophoneButton(state: AssistantState, onListenClick: () -> Unit) {
-    val isListening = state == AssistantState.LISTENING
-    val isEnabled = state != AssistantState.PROCESSING && state != AssistantState.LISTENING
-    val infiniteTransition = rememberInfiniteTransition(label = "mic")
-    val pulseScale by infiniteTransition.animateFloat(
+private fun MicButton(
+    isRecording: Boolean,
+    isBusy: Boolean,
+    onClick: () -> Unit
+) {
+    val transition = rememberInfiniteTransition(label = "mic")
+    val pulse by transition.animateFloat(
         initialValue = 1f,
-        targetValue = if (isListening) 1.2f else 1f,
+        targetValue = if (isRecording) 1.25f else 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(800, easing = FastOutSlowInEasing),
+            animation = tween<Float>(durationMillis = 700, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "pulse"
@@ -185,21 +444,107 @@ fun MicrophoneButton(state: AssistantState, onListenClick: () -> Unit) {
 
     Box(
         modifier = Modifier
-            .size(120.dp)
-            .scale(pulseScale)
-            .alpha(if (isEnabled) 1f else 0.6f)
-            .background(
-                brush = Brush.radialGradient(MicrophoneGradient),
-                shape = CircleShape
-            )
-            .clickable(enabled = isEnabled) { onListenClick() },
+            .size(44.dp)
+            .scale(pulse)
+            .clip(CircleShape)
+            .background(if (isRecording) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary)
+            .clickable(enabled = !isBusy, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Icon(
             painter = painterResource(id = R.drawable.ic_mic),
-            contentDescription = "Microphone",
+            contentDescription = if (isRecording) "إيقاف التسجيل" else "بدء التسجيل",
             tint = Color.White,
-            modifier = Modifier.size(56.dp)
+            modifier = Modifier.size(22.dp)
         )
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AppDrawer(
+    onNewChat: () -> Unit,
+    onClearHistory: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onAbout: () -> Unit
+) {
+    ModalDrawerSheet(drawerContainerColor = MaterialTheme.colorScheme.surface) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(rafeeqHeaderGradient())
+                    .padding(20.dp)
+                    .padding(top = 16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "ر", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "رفيق",
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "مساعدك الصوتي الذكي",
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            DrawerItem(icon = Icons.Filled.Edit, label = "محادثة جديدة", onClick = onNewChat)
+            DrawerItem(icon = Icons.Filled.Settings, label = "الإعدادات", onClick = onOpenSettings)
+            DrawerItem(icon = Icons.Filled.Info, label = "حول التطبيق", onClick = onAbout)
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+
+            DrawerItem(icon = Icons.Filled.Delete, label = "مسح السجل", onClick = onClearHistory)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DrawerItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    NavigationDrawerItem(
+        label = { Text(label) },
+        icon = { Icon(icon, contentDescription = label) },
+        onClick = onClick,
+        modifier = Modifier.padding(horizontal = 12.dp)
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AboutDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("حول رفيق") },
+        text = {
+            Text(
+                text = "رفيق مساعد صوتي ذكي باللغة العربية.\nالإصدار ${BuildConfig.VERSION_NAME}"
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("حسناً") }
+        }
+    )
 }

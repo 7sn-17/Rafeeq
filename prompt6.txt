@@ -1,0 +1,40 @@
+We are building v0.4: The Pro UI/UX & Stability Update. This is a massive overhaul to make the app look and feel like a world-class AI assistant (e.g., ChatGPT, Gemini).
+
+1. **CRITICAL: Fix Groq API Key for CI/CD**:
+   - In `app/build.gradle.kts`, remove the dependency on `local.properties` for the API key. Instead, read it from the environment: `buildConfigField("String", "GROQ_API_KEY", "\"${System.getenv("GROQ_API_KEY") ?: ""}\"")`.
+   - In `.github/workflows/build.yml`, pass the secret to the build step: 
+     ```yaml
+     env:
+       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+     ```
+   - Ensure `AiService.kt` reads `BuildConfig.GROQ_API_KEY`.
+
+2. **Complete UI/UX Overhaul (Jetpack Compose Material 3)**:
+   - **Theme**: Create a stunning green gradient theme (`Theme.Rafeeq`) with Material 3 dynamic colors, rounded corners (24.dp), and smooth animations.
+   - **Navigation Drawer**: Add a `ModalNavigationDrawer` (hamburger menu on top-left) containing: App Logo, "New Chat", "Settings", "About", and "Clear History"[reference:3].
+   - **Top App Bar**: Display the app name "رفيق" with a subtle green gradient, and the hamburger menu icon on the left.
+   - **Chat Bubbles**: Redesign them beautifully. User bubbles on the right (primary color), Assistant on the left (surface variant). Add a "typing" or "thinking" indicator (three bouncing dots) while waiting for Groq[reference:4].
+   - **Bottom Input Bar (CRITICAL)**: Replace the floating mic button with a modern bottom input bar pinned above the keyboard. It must include:
+     - An `OutlinedTextField` for typing text.
+     - A Mic icon button (toggles voice recording). When recording, show a pulsing red animation.
+     - A Send icon button (enabled only when text is not empty).
+     - Use `WindowInsets` to ensure the input bar stays above the keyboard[reference:5].
+
+3. **Real-time Status Updates**:
+   - When the user sends a command, show step-by-step updates in the chat: "جاري تحليل الطلب..." -> "جاري تنفيذ المهارة..." -> "تم بنجاح".
+   - If the AI is calling a tool (e.g., OrganizeImages), display a special system bubble showing the action being performed.
+
+4. **High-Quality Arabic TTS**:
+   - Currently, the TTS sounds robotic. Improve the `TtsManager.kt`:
+     - Set the language to Arabic (`ar-SA` or `ar-EG`).
+     - Allow the user to select a preferred voice from the device's installed TTS engines.
+     - Add a "Mute/Unmute" toggle in the top bar.
+
+5. **Settings Screen**:
+   - Create a simple Settings screen accessible from the drawer.
+   - Allow the user to toggle TTS on/off, change the app theme (Light/Dark/System), and view the app version.
+
+6. **Finalize**:
+   - Do NOT build locally.
+   - Commit with the Arabic message: "إصدار 0.4: واجهة احترافية، شريط إدخال سفلي، وإصلاح مفتاح Groq".
+   - Push to GitHub.

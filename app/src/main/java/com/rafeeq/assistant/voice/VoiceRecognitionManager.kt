@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asSharedFlow
  * Wraps Android's [SpeechRecognizer].
  *
  * - [startListening] requests the RECORD_AUDIO permission at runtime when needed.
+ * - [stopListening] lets the user cancel, without that being reported as a failure.
  * - Recognized text is published on [recognizedText].
  * - Failures (permission denied, recognizer errors, no results) are published on [recognitionFailed].
  *
@@ -30,6 +31,10 @@ class VoiceRecognitionManager(context: Context) {
     private val appContext = context.applicationContext
 
     private var speechRecognizer: SpeechRecognizer? = null
+
+    /** True while a user-initiated stop is in flight, so it is not reported as an error. */
+    @Volatile
+    private var cancelRequested = false
 
     /** Set by the activity; receives the permission that has to be requested. */
     var permissionRequester: ((String) -> Unit)? = null
@@ -68,6 +73,20 @@ class VoiceRecognitionManager(context: Context) {
         }
     }
 
+    /**
+     * Cancels an in-progress listening session because the user tapped the mic again.
+     * The recognizer reports a cancellation through [RecognitionListener.onError]; the
+     * [cancelRequested] flag keeps that from surfacing as an error message.
+     */
+    fun stopListening() {
+        cancelRequested = true
+        try {
+            speechRecognizer?.cancel()
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not cancel speech recognition", e)
+        }
+    }
+
     /** Called by the activity once the RECORD_AUDIO permission dialog has been answered. */
     fun onPermissionResult(isGranted: Boolean) {
         if (isGranted) {
@@ -79,6 +98,7 @@ class VoiceRecognitionManager(context: Context) {
     }
 
     private fun startListeningInternal() {
+        cancelRequested = false
         try {
             speechRecognizer?.cancel()
             speechRecognizer?.destroy()
@@ -123,6 +143,7 @@ class VoiceRecognitionManager(context: Context) {
     private val recognitionListener = object : RecognitionListener {
 
         override fun onResults(results: Bundle) {
+            cancelRequested = false
             val text = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 ?.firstOrNull()
             if (text.isNullOrBlank()) {
@@ -135,6 +156,11 @@ class VoiceRecognitionManager(context: Context) {
         }
 
         override fun onError(error: Int) {
+            if (cancelRequested) {
+                cancelRequested = false
+                Log.i(TAG, "Recognition was stopped by the user")
+                return
+            }
             Log.e(TAG, "Speech recognition error, code=$error")
             fail()
         }

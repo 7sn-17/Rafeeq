@@ -30,11 +30,26 @@
             <action android:name="android.intent.action.SENDTO" />
             <data android:scheme="smsto" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.WIFI_SETTINGS" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.BLUETOOTH_SETTINGS" />
+        </intent>
         <package android:name="com.whatsapp" />
         <package android:name="com.whatsapp.w4b" />
     </queries>
 
     <application
+                <service
+            android:name=".service.RafeeqBackgroundService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="رفيق"
@@ -42,21 +57,29 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Rafeeq">
 
-        <service
-            android:name=".service.RafeeqBackgroundService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="microphone" />
-
-        <activity
-            android:name=".MainActivity"
+            <service
+            android:name=".tile.RafeeqTileService"
             android:exported="true"
-            android:windowSoftInputMode="adjustResize">
+            android:icon="@drawable/ic_mic"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
-        </activity>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="false" />
+        </service>
+                    <receiver
+            android:name=".widget.RafeeqWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/rafeeq_widget_info" />
+        </receiver>
     </application>
 
 </manifest>

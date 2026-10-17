@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">رفيق</string>
+    <string name="rafeeq_tile_desc">فتح رفيق والتحدث</string>
 </resources>

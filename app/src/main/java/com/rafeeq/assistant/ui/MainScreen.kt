@@ -562,7 +562,7 @@ private fun AboutDialog(onDismiss: () -> Unit) {
         title = { Text("حول رفيق") },
         text = {
             Text(
-                text = "رفيق مساعد صوتي ذكي باللغة العربية.\nالإصدار ${BuildConfig.VERSION_NAME}"
+                text = "رفيق مساعد صوتي ذكي باللغة العربية.\nالإصدار ${BuildConfig.VERSION_NAME}\nتم التطوير بواسطة Hassan Al-Mohammad"
             )
         },
         confirmButton = {

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/rafeeq_primary"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:baselineAligned="false">
+
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="رفيق"
+        android:textColor="@android:color/white"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/widget_subtitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="مساعدك الصوتي"
+        android:textColor="@android:color/white"
+        android:textSize="12sp" />
+
+    <TextView
+        android:id="@+id/widget_action"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="@android:color/white"
+        android:paddingLeft="12dp"
+        android:paddingTop="6dp"
+        android:paddingRight="12dp"
+        android:paddingBottom="6dp"
+        android:text="ابدأ التحدث"
+        android:textColor="@color/rafeeq_primary"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+</LinearLayout>

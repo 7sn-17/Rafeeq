@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import com.rafeeq.assistant.core.AssistantEngine
 import com.rafeeq.assistant.core.AssistantState
 import com.rafeeq.assistant.core.ChatMessage
+import com.rafeeq.assistant.skills.PendingConfirmation
+import com.rafeeq.assistant.skills.PendingPermissionRequest
 import com.rafeeq.assistant.tts.TtsVoice
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -47,11 +49,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val appVersion: String = com.rafeeq.assistant.BuildConfig.VERSION_NAME
 
     init {
-        viewModelScope.launch {
-            engine.permissionRequest.collect { permission ->
-                engine.audioPermissionRequester?.invoke(permission)
-            }
-        }
+        // The skill permission dialog is driven by Compose observing
+        // [engine.pendingPermissionRequest] rather than a SharedFlow. Audio permission is still
+        // routed via the requester bound from the Activity.
         viewModelScope.launch {
             engine.ttsReadyTick.collect {
                 refreshVoices()
@@ -115,7 +115,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         engine.setPermissionRequester(requester)
     }
 
-    fun setSkillPermissionRequester(requester: (String) -> Unit) {
+    fun setSkillPermissionRequester(requester: (List<String>) -> Unit) {
         engine.setSkillPermissionRequester(requester)
     }
 
@@ -123,8 +123,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         engine.onAudioPermissionResult(isGranted)
     }
 
+    val pendingPermissionRequest: StateFlow<PendingPermissionRequest?> = engine.pendingPermissionRequest
+    val pendingConfirmation: StateFlow<PendingConfirmation?> = engine.pendingConfirmation
+
     fun onPermissionResult(permission: String, isGranted: Boolean) {
         engine.onPermissionResult(permission, isGranted)
+    }
+
+    fun onPermissionResult(results: Map<String, Boolean>) {
+        engine.onPermissionResult(results)
+    }
+
+    fun onPermissionDialogShown(id: String) {
+        engine.onPermissionDialogShown(id)
+    }
+
+    fun onConfirmationResult(actionId: String, confirmed: Boolean) {
+        engine.onConfirmationResult(actionId, confirmed)
     }
 
     private fun loadThemeMode(): ThemeMode {

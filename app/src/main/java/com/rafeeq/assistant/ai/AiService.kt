@@ -123,23 +123,28 @@ class AiService {
     }
 
     /**
-     * Turns one spoken utterance into an [AssistantRequest].
+     * Turns the conversation so far into an [AssistantRequest].
+     *
+     * [conversation] carries the last exchanges (most recent last) so the model can resolve
+     * references such as "اجعله أقوى" that depend on earlier context. The final entry must be
+     * the user's new utterance; anything earlier is background only.
      *
      * Falls back through [FALLBACK_MODELS] in order; returns a user-facing message when
      * every model has failed.
      */
-    suspend fun interpret(userSpeech: String): AssistantRequest {
-        if (userSpeech.isBlank()) return AssistantRequest.Unknown
+    suspend fun interpret(conversation: List<ChatMessageDto>): AssistantRequest {
+        val userSpeech = conversation.lastOrNull()?.takeIf { it.role == ROLE_USER }?.content
+        if (userSpeech.isNullOrBlank()) return AssistantRequest.Unknown
 
         if (apiKey.isEmpty() || apiKey == NULL_LITERAL) {
             Log.w(TAG, "GROQ_API_KEY is missing")
             return AssistantRequest.Talk(MISSING_KEY_MESSAGE)
         }
 
-        val messages = listOf(
-            ChatMessageDto(role = "system", content = SYSTEM_PROMPT),
-            ChatMessageDto(role = "user", content = userSpeech)
-        )
+        val messages = buildList {
+            add(ChatMessageDto(role = ROLE_SYSTEM, content = SYSTEM_PROMPT))
+            addAll(conversation.takeLast(CONTEXT_WINDOW_MESSAGES))
+        }
 
         for (model in FALLBACK_MODELS) {
             try {
@@ -173,6 +178,10 @@ class AiService {
         Log.e(TAG, "All Groq models failed")
         return AssistantRequest.Talk(ALL_MODELS_FAILED_MESSAGE)
     }
+
+    /** Convenience overload for a single utterance with no prior context. */
+    suspend fun interpret(userSpeech: String): AssistantRequest =
+        interpret(listOf(ChatMessageDto(role = ROLE_USER, content = userSpeech)))
 
     /** Reads `choices[0].message.tool_calls[0]`, falling back to plain `content`. */
     private fun parseResponse(body: ChatResponse): AssistantRequest {
@@ -223,6 +232,12 @@ class AiService {
         const val READ_TIMEOUT_SECONDS = 45L
         const val NULL_LITERAL = "null"
 
+        const val ROLE_SYSTEM = "system"
+        const val ROLE_USER = "user"
+
+        /** How many recent turns are sent as context, including the current utterance. */
+        const val CONTEXT_WINDOW_MESSAGES = 5
+
         /** Ordered fallback chain: fastest first, heaviest last. */
         val FALLBACK_MODELS = listOf(
             "openai/gpt-oss-20b",
@@ -234,7 +249,10 @@ class AiService {
             "أنت رفيق، مساعد صوتي ذكي باللغة العربية. " +
                 "عندما يرى المستخدم أمرًا يتطلب استخدام أداة معينة، استخدم أدواتك المتاحة. " +
                 "لا تستخدم ردًا أخيريًا طويلًا إذا كان الأمر بسيطًا. " +
-                "إذا لم يتطلب الأمر أي أداة، أجِب مباشرة بالعربية."
+                "إذا لم يتطلب الأمر أي أداة، أجِب مباشرة بالعربية. " +
+                "لا تدّعي نجاحًا تلقائيًا: إذا فتحت شاشة إعدادات أو خرجت من التطبيق، صِف ما فعلته بدقة وبالعربية. " +
+                "لديك ذاكرة محادثة من الرسائل السابقة؛ استخدمها لفهم الإشارة والتتابع، " +
+                "مثل ربط ضمائر وأسماء الإشارة بما سبقها، دون تكرار ما طلبه المستخدم سابقاً."
 
         const val MISSING_KEY_MESSAGE =
             "يحتاج التطبيق لمفتاح GROQ_API_KEY في local.properties"
@@ -322,6 +340,87 @@ class AiService {
                             )
                         ),
                         "required" to listOf("setting", "state")
+                    )
+                )
+            ),
+
+            // changeSystemSetting(action, state) - the comprehensive system-control tool.
+            ToolDefinition(
+                function = FunctionDefinition(
+                    name = "changeSystemSetting",
+                    description = "التحكم في إعدادات النظام: وضع الطيران، نقطة الاتصال، NFC، عدم الإزعاج، تدوير الشاشة، الوضع الداكن",
+                    parameters = mapOf(
+                        "type" to "object",
+                        "properties" to mapOf(
+                            "action" to mapOf(
+                                "type" to "string",
+                                "enum" to listOf(
+                                    "airplane_mode",
+                                    "hotspot",
+                                    "nfc",
+                                    "dnd",
+                                    "rotation",
+                                    "dark_mode"
+                                ),
+                                "description" to "اسم الإعداد المطلوب تغييره"
+                            ),
+                            "state" to mapOf(
+                                "type" to "string",
+                                "enum" to listOf("on", "off"),
+                                "description" to "الحالة المطلوبة: on أو off"
+                            )
+                        ),
+                        "required" to listOf("action", "state")
+                    )
+                )
+            ),
+
+            // openSystemSetting(setting) - mainly for wifi/bluetooth settings panel
+            ToolDefinition(
+                function = FunctionDefinition(
+                    name = "openSystemSetting",
+                    description = "فتح إعدادات النظام لعرض خيارات البلوتوث أو الواي فاي بدلاً من تغييرها مباشرة",
+                    parameters = mapOf(
+                        "type" to "object",
+                        "properties" to mapOf(
+                            "setting" to mapOf(
+                                "type" to "string",
+                                "enum" to listOf("wifi", "bluetooth"),
+                                "description" to "اسم الإعداد"
+                            )
+                        ),
+                        "required" to listOf("setting")
+                    )
+                )
+            ),
+
+            // openApp(package)
+            ToolDefinition(
+                function = FunctionDefinition(
+                    name = "openApp",
+                    description = "فتح تطبيق مثبت على الجهاز باستخدام اسم حزمه",
+                    parameters = mapOf(
+                        "type" to "object",
+                        "properties" to mapOf(
+                            "package" to mapOf(
+                                "type" to "string",
+                                "description" to "اسم حزمة التطبيق"
+                            )
+                        ),
+                        "required" to listOf("package")
+                    )
+                )
+            ),
+
+            // takeScreenshot
+            ToolDefinition(
+                function = FunctionDefinition(
+                    name = "takeScreenshot",
+                    description = "التقاط لقطة شاشة. لا يمكن التقاطها بالكامل تلقائياً في هذا الإصدار؛ يُعاد توجيه المستخدم لإجرائها يدويًا",
+                    parameters = mapOf(
+                        "type" to "object",
+                        "properties" to emptyMap<String, Any>(),
+                        "required" to emptyList<String>()
                     )
                 )
             )

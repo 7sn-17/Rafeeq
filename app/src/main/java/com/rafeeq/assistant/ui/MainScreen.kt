@@ -79,6 +79,8 @@ import com.rafeeq.assistant.R
 import com.rafeeq.assistant.core.AssistantState
 import com.rafeeq.assistant.core.ChatMessage
 import com.rafeeq.assistant.core.MessageRole
+import com.rafeeq.assistant.skills.PendingConfirmation
+import com.rafeeq.assistant.skills.PendingPermissionRequest
 import com.rafeeq.assistant.ui.theme.rafeeqHeaderGradient
 import kotlinx.coroutines.launch
 
@@ -89,12 +91,17 @@ fun MainScreen(
     messages: List<ChatMessage>,
     statusText: String?,
     ttsMuted: Boolean,
+    pendingPermission: PendingPermissionRequest? = null,
+    pendingConfirmation: PendingConfirmation? = null,
     onSendText: (String) -> Unit,
     onToggleMic: () -> Unit,
     onToggleMute: () -> Unit,
     onNewChat: () -> Unit,
     onClearHistory: () -> Unit,
     onOpenSettings: () -> Unit,
+    onPermissionShown: (String) -> Unit = {},
+    onPermissionResult: (Map<String, Boolean>) -> Unit = {},
+    onConfirmationResult: (String, Boolean) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -156,6 +163,17 @@ fun MainScreen(
     if (showAbout) {
         AboutDialog(onDismiss = { showAbout = false })
     }
+
+    PermissionDialog(
+        pendingPermission = pendingPermission,
+        onShown = onPermissionShown,
+        onResult = onPermissionResult
+    )
+
+    ConfirmationDialog(
+        pendingConfirmation = pendingConfirmation,
+        onResult = onConfirmationResult
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -549,6 +567,51 @@ private fun AboutDialog(onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("حسناً") }
+        }
+    )
+}
+
+@Composable
+private fun PermissionDialog(
+    pendingPermission: PendingPermissionRequest?,
+    onShown: (String) -> Unit,
+    onResult: (Map<String, Boolean>) -> Unit
+) {
+    if (pendingPermission == null) return
+
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { grantResults ->
+        onResult(grantResults)
+    }
+
+    androidx.compose.runtime.LaunchedEffect(pendingPermission.id) {
+        onShown(pendingPermission.id)
+        launcher.launch(pendingPermission.permissions.toTypedArray())
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConfirmationDialog(
+    pendingConfirmation: PendingConfirmation?,
+    onResult: (String, Boolean) -> Unit
+) {
+    if (pendingConfirmation == null) return
+
+    AlertDialog(
+        onDismissRequest = { onResult(pendingConfirmation.actionId, false) },
+        title = { Text("تأكيد") },
+        text = { Text(pendingConfirmation.message) },
+        confirmButton = {
+            TextButton(onClick = { onResult(pendingConfirmation.actionId, true) }) {
+                Text("نعم")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { onResult(pendingConfirmation.actionId, false) }) {
+                Text("لا")
+            }
         }
     )
 }

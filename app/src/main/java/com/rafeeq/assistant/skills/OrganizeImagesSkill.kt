@@ -12,6 +12,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -19,42 +20,80 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * Verified outcome of an organization run.
+ *
+ * [found] is how many images the query produced and [moved] how many were actually relocated;
+ * the difference is reported to the user instead of being folded into a generic success, since
+ * a successful query is not the same thing as successful organization.
+ */
+data class OrganizeSummary(
+    val found: Int,
+    val moved: Int
+)
+
 class OrganizeImagesSkill(context: Context) {
     private val appContext = context.applicationContext
 
     var progressCallback: ((ProcessingState, Map<String, String>) -> Unit)? = null
 
-    suspend fun execute(sortBy: String = SORT_BY_DATE): Int = withContext(Dispatchers.IO) {
+    /**
+     * Counts the images [execute] would touch, without modifying anything. Lets the caller ask
+     * for consent before a bulk operation starts.
+     */
+    suspend fun countImages(sortBy: String = SORT_BY_DATE): Int = withContext(Dispatchers.IO) {
+        if (!hasMediaReadPermission()) return@withContext 0
+        try {
+            queryImages().size
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to query images from MediaStore", e)
+            0
+        }
+    }
+
+    suspend fun execute(sortBy: String = SORT_BY_DATE): OrganizeSummary = withContext(Dispatchers.IO) {
         progressCallback?.invoke(ProcessingState.SEARCHING_FILES, emptyMap())
         if (!hasMediaReadPermission()) {
             Log.w(TAG, "Media read permission is not granted; skipping image organization")
-            return@withContext 0
+            return@withContext OrganizeSummary(found = 0, moved = 0)
         }
 
-        var totalCount = 0
-        var movedCount = 0
-        try {
-            val images = queryImages()
-            totalCount = images.size
-            if (totalCount > 0) {
-                progressCallback?.invoke(ProcessingState.MOVING_FILES, mapOf("count" to totalCount.toString()))
-            }
-            for (image in images) {
-                try {
-                    if (moveImage(image, targetFolderFor(image, sortBy))) {
-                        movedCount++
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to move image '${image.displayName}'", e)
-                }
-            }
+        val images = try {
+            queryImages()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Failed to query images from MediaStore", e)
+            progressCallback?.invoke(ProcessingState.COMPLETED, emptyMap())
+            return@withContext OrganizeSummary(found = 0, moved = 0)
         }
 
-        Log.i(TAG, "Image organization finished: moved $movedCount of $totalCount images")
+        if (images.isNotEmpty()) {
+            progressCallback?.invoke(
+                ProcessingState.MOVING_FILES,
+                mapOf("count" to images.size.toString())
+            )
+        }
+
+        var movedCount = 0
+        for (image in images) {
+            try {
+                if (moveImage(image, targetFolderFor(image, sortBy))) {
+                    movedCount++
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A single unreadable or locked file must not abort the rest of the batch.
+                Log.e(TAG, "Failed to move image '${image.displayName}'", e)
+            }
+        }
+
+        Log.i(TAG, "Image organization finished: moved $movedCount of ${images.size} images")
         progressCallback?.invoke(ProcessingState.COMPLETED, emptyMap())
-        movedCount
+        OrganizeSummary(found = images.size, moved = movedCount)
     }
 
     private fun hasMediaReadPermission(): Boolean {
@@ -65,6 +104,8 @@ class OrganizeImagesSkill(context: Context) {
         }
         return ContextCompat.checkSelfPermission(appContext, permission) == PackageManager.PERMISSION_GRANTED
     }
+
+    // cleaned up duplicate query block
 
     private fun queryImages(): List<ImageEntry> {
         val images = mutableListOf<ImageEntry>()
@@ -80,57 +121,63 @@ class OrganizeImagesSkill(context: Context) {
         val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
         val dateFolderFormat = SimpleDateFormat(DATE_PATTERN, Locale.US)
 
-        appContext.contentResolver.query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            projection,
-            null,
-            null,
-            sortOrder
-        )?.use { cursor ->
-            val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-            val nameIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
-            val dateAddedIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
-            val mimeTypeIndex = cursor.getColumnIndex(MediaStore.Images.Media.MIME_TYPE)
-            val dateTakenIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN)
-            val dataIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATA)
-            val sizeIndex = cursor.getColumnIndex(MediaStore.Images.Media.SIZE)
+        try {
+            appContext.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                null,
+                null,
+                sortOrder
+            )?.use { cursor ->
+                val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                val nameIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+                val dateAddedIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+                val mimeTypeIndex = cursor.getColumnIndex(MediaStore.Images.Media.MIME_TYPE)
+                val dateTakenIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN)
+                val dataIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATA)
+                val sizeIndex = cursor.getColumnIndex(MediaStore.Images.Media.SIZE)
 
-            while (cursor.moveToNext()) {
-                val displayName = cursor.getString(nameIndex)
-                if (displayName.isNullOrBlank()) continue
+                while (cursor.moveToNext()) {
+                    val displayName = cursor.getString(nameIndex)
+                    if (displayName.isNullOrBlank()) continue
 
-                val filePath = if (dataIndex >= 0 && !cursor.isNull(dataIndex)) {
-                    cursor.getString(dataIndex)
-                } else {
-                    null
-                }
-
-                if (isAlreadySorted(filePath)) continue
-
-                val dateMillis = if (dateTakenIndex >= 0 && !cursor.isNull(dateTakenIndex)) {
-                    cursor.getLong(dateTakenIndex)
-                } else {
-                    cursor.getLong(dateAddedIndex) * MILLIS_PER_SECOND
-                }
-
-                val id = cursor.getLong(idIndex)
-                images += ImageEntry(
-                    uri = ContentUris.withAppendedId(
-                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                        id
-                    ),
-                    displayName = displayName,
-                    mimeType = if (mimeTypeIndex >= 0) cursor.getString(mimeTypeIndex) else null,
-                    dateMillis = dateMillis,
-                    dateFolder = dateFolderFormat.format(Date(dateMillis)),
-                    filePath = filePath,
-                    sizeBytes = if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
-                        cursor.getLong(sizeIndex)
+                    val filePath = if (dataIndex >= 0 && !cursor.isNull(dataIndex)) {
+                        cursor.getString(dataIndex)
                     } else {
-                        0L
+                        null
                     }
-                )
+
+                    if (isAlreadySorted(filePath)) continue
+
+                    val dateMillis = if (dateTakenIndex >= 0 && !cursor.isNull(dateTakenIndex)) {
+                        cursor.getLong(dateTakenIndex)
+                    } else {
+                        cursor.getLong(dateAddedIndex) * MILLIS_PER_SECOND
+                    }
+
+                    val id = cursor.getLong(idIndex)
+                    images += ImageEntry(
+                        uri = ContentUris.withAppendedId(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            id
+                        ),
+                        displayName = displayName,
+                        mimeType = if (mimeTypeIndex >= 0) cursor.getString(mimeTypeIndex) else null,
+                        dateMillis = dateMillis,
+                        dateFolder = dateFolderFormat.format(Date(dateMillis)),
+                        filePath = filePath,
+                        sizeBytes = if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
+                            cursor.getLong(sizeIndex)
+                        } else {
+                            0L
+                        }
+                    )
+                }
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to query images from MediaStore", e)
         }
         return images
     }
@@ -245,7 +292,16 @@ class OrganizeImagesSkill(context: Context) {
         } catch (e: SecurityException) {
             Log.d(TAG, "Stale MediaStore row for '${image.displayName}' left")
         }
-        MediaScannerConnection.scanFile(appContext, arrayOf(target.absolutePath), arrayOf(image.mimeType), null)
+        try {
+            MediaScannerConnection.scanFile(
+                appContext,
+                arrayOf(target.absolutePath),
+                arrayOf(image.mimeType),
+                null
+            )
+        } catch (e: Exception) {
+            Log.d(TAG, "MediaScanner failed for '${image.displayName}'", e)
+        }
         return true
     }
 
@@ -253,8 +309,12 @@ class OrganizeImagesSkill(context: Context) {
         var target = File(directory, displayName)
         if (!target.exists()) return target
 
-        val baseName = displayName.substringBeforeLast('.')
-        val extension = displayName.substringAfterLast('.', "")
+        val baseName = displayName.substringBeforeLast('.', displayName)
+        val extension = if (displayName.contains('.')) {
+            displayName.substringAfterLast('.', "")
+        } else {
+            ""
+        }
         var counter = 1
         while (target.exists()) {
             target = if (extension.isBlank()) {

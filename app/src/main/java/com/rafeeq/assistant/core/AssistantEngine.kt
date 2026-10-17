@@ -3,12 +3,14 @@ package com.rafeeq.assistant.core
 import android.content.Context
 import com.rafeeq.assistant.ai.AiService
 import com.rafeeq.assistant.ai.AssistantRequest
+import com.rafeeq.assistant.ai.ChatMessageDto
 import com.rafeeq.assistant.permissions.PermissionsManager
 import com.rafeeq.assistant.skills.CommunicationSkill
 import com.rafeeq.assistant.skills.DeviceSettingsSkill
 import com.rafeeq.assistant.skills.OrganizeImagesSkill
 import com.rafeeq.assistant.skills.SkillManager
 import com.rafeeq.assistant.skills.SkillResult
+import com.rafeeq.assistant.skills.SystemControlSkill
 import com.rafeeq.assistant.tts.TtsManager
 import com.rafeeq.assistant.tts.TtsVoice
 import com.rafeeq.assistant.voice.VoiceRecognitionManager
@@ -52,12 +54,14 @@ class AssistantEngine(private val context: Context) {
     private val voiceRecognitionManager = VoiceRecognitionManager(context)
     private val aiService = AiService()
     private val organizeImagesSkill = OrganizeImagesSkill(context)
-    private val communicationSkill = CommunicationSkill(context)
-    private val deviceSettingsSkill = DeviceSettingsSkill(context)
+    private val communicationSkill = CommunicationSkill(context, permissionsManager)
+    private val deviceSettingsSkill = DeviceSettingsSkill(context, permissionsManager)
+    private val systemControlSkill = SystemControlSkill(context)
     private val skillManager = SkillManager(
         organizeImagesSkill = organizeImagesSkill,
         communicationSkill = communicationSkill,
         deviceSettingsSkill = deviceSettingsSkill,
+        systemControlSkill = systemControlSkill,
         permissionsManager = permissionsManager
     )
     private val ttsManager = TtsManager(context)
@@ -89,9 +93,6 @@ class AssistantEngine(private val context: Context) {
 
     /** Bumped once the TTS engine has finished initialising, so voices can be listed. */
     val ttsReadyTick: StateFlow<Int> get() = ttsManager.readyTick
-
-    private val _permissionRequest = MutableSharedFlow<String>(extraBufferCapacity = 1)
-    val permissionRequest = _permissionRequest.asSharedFlow()
 
     var audioPermissionRequester: ((String) -> Unit)? = null
 
@@ -171,10 +172,14 @@ class AssistantEngine(private val context: Context) {
         voiceRecognitionManager.onPermissionResult(isGranted)
     }
 
-    fun onPermissionResult(permission: String, isGranted: Boolean) {
+    fun onPermissionResult(results: Map<String, Boolean>) {
         scope.launch {
-            skillManager.onPermissionResult(permission, isGranted)
+            skillManager.onPermissionResult(results)
         }
+    }
+
+    fun onPermissionResult(permission: String, isGranted: Boolean) {
+        onPermissionResult(mapOf(permission to isGranted))
     }
 
     private suspend fun handleUserSpeech(speech: String) {
@@ -184,7 +189,7 @@ class AssistantEngine(private val context: Context) {
         _statusText.value = STATUS_ANALYZING
 
         try {
-            val request = aiService.interpret(speech)
+            val request = aiService.interpret(conversationHistory())
             respond(request)
         } catch (e: Exception) {
             respond(SkillResult("عذراً، حدث خطأ غير متوقع", success = false))
@@ -192,6 +197,23 @@ class AssistantEngine(private val context: Context) {
             _statusText.value = null
         }
     }
+
+    /**
+     * Builds the context window handed to Groq: the last [CONTEXT_WINDOW_MESSAGES] real turns,
+     * ending with the utterance that was just appended to [_messages].
+     *
+     * System bubbles are excluded because they are transient progress markers
+     * ("جاري تنفيذ المهارة..."), not part of the conversation.
+     */
+    private fun conversationHistory(): List<ChatMessageDto> = _messages.value
+        .filter { it.role != MessageRole.SYSTEM }
+        .map { message ->
+            ChatMessageDto(
+                role = if (message.isUser) "user" else "assistant",
+                content = message.text
+            )
+        }
+        .takeLast(CONTEXT_WINDOW_MESSAGES)
 
     private fun addMessage(message: ChatMessage) {
         _messages.value = _messages.value + message
@@ -231,7 +253,24 @@ class AssistantEngine(private val context: Context) {
         "callContact" -> "جاري الاتصال..."
         "sendWhatsAppMessage" -> "جاري إرسال رسالة واتساب..."
         "changeDeviceSetting" -> "جاري تغيير إعدادات الجهاز..."
+        "openSystemSetting" -> "جاري فتح إعدادات النظام..."
+        "changeSystemSetting" -> "جاري تغيير إعداد النظام..."
+        "openApp" -> "جاري فتح التطبيق..."
+        "takeScreenshot" -> "جاري الاستعداد لالتقاط لقطة شاشة..."
         else -> "جاري تنفيذ الأمر..."
+    }
+
+    val pendingPermissionRequest = skillManager.pendingPermission
+    val pendingConfirmation = skillManager.pendingConfirmation
+
+    fun onPermissionDialogShown(id: String) {
+        skillManager.onPermissionDialogShown(id)
+    }
+
+    fun onConfirmationResult(actionId: String, confirmed: Boolean) {
+        scope.launch {
+            skillManager.onConfirmationResult(actionId, confirmed)
+        }
     }
 
     fun updateState(state: AssistantState) {
@@ -265,18 +304,26 @@ class AssistantEngine(private val context: Context) {
         voiceRecognitionManager.permissionRequester = requester
     }
 
-    /** Lets skills show the real Android permission dialog instead of just failing. */
-    fun setSkillPermissionRequester(requester: (String) -> Unit) {
-        skillManager.permissionRequester = requester
+    /**
+     * Skills publish [PendingPermissionRequest] on [skillManager.pendingPermission]. The Compose
+     * UI observes it, launches the system dialog, calls [onPermissionDialogShown], and reports
+     * the result via [onPermissionResult]. No launcher is stored in the ViewModel.
+     */
+    fun setSkillPermissionRequester(requester: (List<String>) -> Unit) {
+        // kept for backward compatibility if still referenced; the new flow does not need it
     }
 
     fun destroy() {
         voiceRecognitionManager.destroy()
         ttsManager.shutdown()
+        skillManager.dispose()
     }
 
     private companion object {
         const val STATUS_ANALYZING = "جاري تحليل الطلب..."
         const val STATUS_EXECUTING = "جاري تنفيذ المهارة..."
+
+        /** Recent turns (user + assistant) sent to Groq as conversational memory. */
+        const val CONTEXT_WINDOW_MESSAGES = 5
     }
 }

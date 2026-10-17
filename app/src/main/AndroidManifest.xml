@@ -14,7 +14,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="Android Assistant"
+        android:label="رفيق"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 

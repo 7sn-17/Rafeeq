@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout sources
@@ -39,20 +41,49 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
-      # Guards against Android's "Parse error" at install time: confirms the built APK is a
-      # well-formed package (a valid zip containing AndroidManifest.xml + classes.dex) and
-      # prints a SHA-256 so a truncated download can be ruled out by comparison. Note that
-      # upload-artifact delivers the APK wrapped in a zip; the .zip must be extracted before
-      # installing, or Android reports "Parse error".
-      - name: Inspect APK
+      - name: Verify APK
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
           ls -la "$APK"
-          unzip -l "$APK" | grep -E 'AndroidManifest\.xml|classes.*\.dex'
+          echo "Checking APK size (must be > 1MB)"
+          SIZE=$(stat -c%s "$APK")
+          if [ "$SIZE" -le 1048576 ]; then
+            echo "APK too small: $SIZE bytes"
+            exit 1
+          fi
+          BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* 2>/dev/null | tail -n 1)
+          if [ -z "$BUILD_TOOLS" ]; then
+            echo "Build tools not found"
+            exit 1
+          fi
+          echo "Using build tools: $BUILD_TOOLS"
+          if [ -f "$BUILD_TOOLS/apksigner" ]; then
+            $BUILD_TOOLS/apksigner verify --print-certs "$APK" || exit 1
+          fi
+          if [ -f "$BUILD_TOOLS/aapt" ]; then
+            $BUILD_TOOLS/aapt dump badging "$APK" | head -5
+          fi
           echo "SHA-256: $(sha256sum "$APK" | cut -d' ' -f1)"
+
+      - name: Extract versionName and rename APK
+        run: |
+          VERSION_NAME=$(grep -E "versionName" app/build.gradle.kts | sed -E 's/.*versionName\s*=\s*"([^"]+)".*/\1/')
+          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/Rafeeq_v$VERSION_NAME.apk
+          ls -la dist/
+        shell: bash
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: dist/Rafeeq_v${{ env.VERSION_NAME }}.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION_NAME }}
+          name: Rafeeq v${{ env.VERSION_NAME }}
+          body: ${{ github.event.head_commit.message }}
+          files: dist/Rafeeq_v${{ env.VERSION_NAME }}.apk

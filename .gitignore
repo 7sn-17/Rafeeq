@@ -15,3 +15,8 @@ node_modules/
 package.json
 package-lock.json
 .code-agent-auto-commit.json
+
+# Signing keystores - never committed
+*.p12
+*.keystore
+keystore_base64.txt

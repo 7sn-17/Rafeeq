@@ -30,9 +30,23 @@ android {
         buildConfigField("String", "GROQ_API_KEY", "\"${properties["GROQ_API_KEY"] ?: ""}\"")
     }
 
+    signingConfigs {
+        create("release") {
+            storeType = "PKCS12"
+            storeFile = file("../release.p12")
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "hasan3522"
+            keyAlias = System.getenv("KEY_ALIAS") ?: "rafeeq"
+            keyPassword = System.getenv("KEY_PASSWORD") ?: "RafeeqPassword123"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("release")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

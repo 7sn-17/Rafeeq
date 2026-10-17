@@ -1,5 +1,8 @@
 package com.rafeeq.assistant
 
+import android.Manifest
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -8,45 +11,59 @@ import androidx.activity.viewModels
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.rafeeq.assistant.service.RafeeqBackgroundService
 import com.rafeeq.assistant.ui.MainScreen
 import com.rafeeq.assistant.ui.MainViewModel
 
-/**
- * Single activity entry point. The activity is only responsible for wiring the runtime
- * permission launcher to [MainViewModel]; every other decision lives in the ViewModel/skills.
- */
 class MainActivity : ComponentActivity() {
-
     private val mainViewModel: MainViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // ActivityResultLauncher registration must happen before the activity is STARTED.
         val audioPermissionLauncher = registerForActivityResult(
             ActivityResultContracts.RequestPermission()
         ) { isGranted ->
             mainViewModel.onAudioPermissionResult(isGranted)
         }
 
-        // VoiceRecognitionManager owns the permission policy; it only needs a way to actually
-        // launch the system permission dialog, which can only be done by the activity.
-        mainViewModel.setAudioPermissionRequester { permission ->
+        val multiPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestMultiplePermissions()
+        ) { result ->
+            result.forEach { (permission, granted) ->
+                mainViewModel.onPermissionResult(permission, granted)
+            }
+        }
+
+        mainViewModel.setPermissionRequester { permission ->
             audioPermissionLauncher.launch(permission)
         }
+
+        startBackgroundServiceIfNeeded()
 
         setContent {
             MaterialTheme {
                 val state by mainViewModel.state.collectAsStateWithLifecycle()
-                val recognizedText by mainViewModel.recognizedText.collectAsStateWithLifecycle()
-                val responseText by mainViewModel.responseText.collectAsStateWithLifecycle()
+                val messages by mainViewModel.messages.collectAsStateWithLifecycle()
+                val errorMessage by mainViewModel.errorMessage.collectAsStateWithLifecycle()
                 MainScreen(
                     state = state,
-                    recognizedText = recognizedText,
-                    responseText = responseText,
+                    messages = messages,
+                    errorMessage = errorMessage,
                     onListenClick = mainViewModel::startListening
                 )
             }
+        }
+    }
+
+    private fun startBackgroundServiceIfNeeded() {
+        val intent = Intent(this, RafeeqBackgroundService::class.java).apply {
+            action = RafeeqBackgroundService.ACTION_START
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
         }
     }
 }

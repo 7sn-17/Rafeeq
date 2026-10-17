@@ -1,0 +1,39 @@
+We are now building v0.3: The Pro Assistant. This update is massive. It includes AI Function Calling, Background Execution, Smart Permissions, and a total UI/UX overhaul. DO NOT attempt to build locally.
+
+1. Advanced AI Function Calling (GeminiService.kt):
+
+· Refactor Gemini to use official FunctionDeclaration instead of raw JSON.
+· Define tools: organizeImages(sortBy), callContact(name), sendWhatsAppMessage(contact, message), and changeDeviceSetting(setting, state).
+· Parse the FunctionCall response and send it to SkillManager.
+
+2. New Skills (SkillManager.kt & Skills Folder):
+
+· CommunicationSkill: Use Intent.ACTION_DIAL for calls, and Intent.ACTION_SEND (with com.whatsapp) for WhatsApp.
+· DeviceSettingsSkill: Use AudioManager for volume control, and BluetoothAdapter for Bluetooth (requires Android 12+ BLUETOOTH_CONNECT).
+
+3. Background Execution (Foreground Service):
+
+· Create RafeeqBackgroundService.kt (Foreground Service).
+· It must show a persistent, non-dismissible notification ("رفيق يعمل في الخلفية") to keep the OS from killing the app when the user leaves it.
+· The service should handle voice processing and TTS even if the UI is closed.
+
+4. Smart Contextual Permissions (Permissions Manager):
+
+· Do NOT ask for all permissions at startup.
+· Ask for RECORD_AUDIO only when the mic button is pressed.
+· Ask for READ_MEDIA_IMAGES only when an image organization command is triggered.
+· If a permission is denied, show a graceful UI message ("أحتاج إذن الصور لأقوم بترتيبها").
+
+5. UI/UX Professional Overhaul (Jetpack Compose):
+
+· Chat History: Use LazyColumn for chat bubbles. User bubbles on the right, Rafeeq on the left.
+· Real-Time Status Updates: Create an enum ProcessingState (ANALYZING, SEARCHING_FILES, MOVING_FILES, COMPLETED). Show these step-by-step texts below the mic button so the user knows exactly what Rafeeq is doing (e.g., "جاري البحث عن الصور...", "جاري نقل 15 صورة...").
+· Visuals: Use a beautiful Material 3 theme. Add a subtle gradient background. Make the mic button pulse when listening.
+· Graceful Errors: Never use Toasts for errors. Show inline UI error messages in the chat.
+
+6. Manifest Updates:
+
+· Add <uses-permission android:name="android.permission.FOREGROUND_SERVICE" /> and <uses-permission android:name="android.permission.POST_NOTIFICATIONS" /> (for Android 13+).
+· Add <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />.
+
+Please implement all these files, update the Manifest, and ensure clean Compose code. Once finished, tell me to push.

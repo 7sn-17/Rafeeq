@@ -11,21 +11,26 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,203 +41,163 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.rafeeq.assistant.R
+import com.rafeeq.assistant.core.AssistantState
+import com.rafeeq.assistant.core.ChatMessage
+import com.rafeeq.assistant.skills.ProcessingState
 
-/** Background gradient of the whole screen. */
 private val ScreenGradient = listOf(
     Color(0xFF0F1E4B),
     Color(0xFF1E3A8A),
     Color(0xFF0E7490)
 )
 
-/** Gradient of the microphone button. */
 private val MicrophoneGradient = listOf(
     Color(0xFF4A6BFF),
     Color(0xFF2AC1FF)
 )
 
-/**
- * Stateless home screen: status, the animated microphone button and the conversation bubbles.
- */
 @Composable
 fun MainScreen(
     state: AssistantState,
-    recognizedText: String,
-    responseText: String,
+    messages: List<ChatMessage>,
+    errorMessage: String,
     onListenClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Brush.verticalGradient(ScreenGradient)),
-        contentAlignment = Alignment.Center
+        contentAlignment = Alignment.TopCenter
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = APP_TITLE,
-                style = MaterialTheme.typography.displaySmall,
+                text = "رفيق",
+                style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
-
             Spacer(modifier = Modifier.height(8.dp))
 
-            Text(
-                text = statusTextFor(state),
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White.copy(alpha = 0.85f),
-                textAlign = TextAlign.Center
-            )
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(messages) { message ->
+                    ChatBubble(message = message)
+                }
+                if (errorMessage.isNotEmpty()) {
+                    item {
+                        ChatBubble(ChatMessage(errorMessage, isUser = false))
+                    }
+                }
+            }
 
-            Spacer(modifier = Modifier.height(40.dp))
-
+            Spacer(modifier = Modifier.height(16.dp))
+            ProcessingStatus(state = state)
+            Spacer(modifier = Modifier.height(16.dp))
             MicrophoneButton(state = state, onListenClick = onListenClick)
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
 
-            Spacer(modifier = Modifier.height(40.dp))
-
-            ConversationBubbles(
-                recognizedText = recognizedText,
-                responseText = responseText
+@Composable
+fun ChatBubble(message: ChatMessage) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start
+    ) {
+        Surface(
+            modifier = Modifier.padding(horizontal = 4.dp),
+            color = if (message.isUser) Color(0xFF4A6BFF) else Color(0xFF1E293B),
+            shape = RoundedCornerShape(
+                topStart = 16.dp,
+                topEnd = 16.dp,
+                bottomStart = if (message.isUser) 16.dp else 4.dp,
+                bottomEnd = if (message.isUser) 4.dp else 16.dp
+            )
+        ) {
+            Text(
+                text = message.text,
+                color = Color.White,
+                fontSize = 16.sp,
+                modifier = Modifier.padding(12.dp),
+                textAlign = TextAlign.Start
             )
         }
     }
 }
 
 @Composable
-private fun MicrophoneButton(
-    state: AssistantState,
-    onListenClick: () -> Unit
-) {
-    val isListening = state == AssistantState.LISTENING
-    val isBusy = isListening || state == AssistantState.PROCESSING
-
-    // The animations run continuously; they are only applied while the assistant listens.
-    val infiniteTransition = rememberInfiniteTransition(label = "microphone")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 700, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "microphonePulse"
-    )
-    val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.10f,
-        targetValue = 0.35f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 700, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "microphoneGlow"
-    )
-
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(contentAlignment = Alignment.Center) {
-            // Halo that pulses while listening.
-            Box(
-                modifier = Modifier
-                    .size(168.dp)
-                    .scale(if (isListening) pulseScale else 1f)
-                    .background(
-                        color = Color.White.copy(alpha = if (isListening) glowAlpha else 0f),
-                        shape = CircleShape
-                    )
-            )
-
-            Box(
-                modifier = Modifier
-                    .size(136.dp)
-                    .scale(if (isListening) pulseScale else 1f)
-                    .background(brush = Brush.verticalGradient(MicrophoneGradient), shape = CircleShape)
-                    .clickable(enabled = !isBusy, onClick = onListenClick),
-                contentAlignment = Alignment.Center
-            ) {
-                if (state == AssistantState.PROCESSING) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(52.dp),
-                        color = Color.White,
-                        strokeWidth = 4.dp
-                    )
-                } else {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_mic),
-                        contentDescription = LISTEN_LABEL,
-                        tint = Color.White,
-                        modifier = Modifier.size(56.dp)
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
+fun ProcessingStatus(state: AssistantState) {
+    val text = when (state) {
+        AssistantState.ANALYZING -> "جاري التحليل..."
+        AssistantState.SEARCHING_FILES -> "جاري البحث عن الصور..."
+        AssistantState.MOVING_FILES -> "جاري نقل الصور..."
+        AssistantState.COMPLETED -> "تم الإنتهاء"
+        AssistantState.PROCESSING -> "جاري المعالجة..."
+        AssistantState.LISTENING -> "يستمع..."
+        else -> ""
+    }
+    if (text.isNotEmpty()) {
         Text(
-            text = LISTEN_LABEL,
-            style = MaterialTheme.typography.titleMedium,
-            color = Color.White.copy(alpha = 0.9f)
+            text = text,
+            color = Color.White.copy(alpha = 0.9f),
+            fontSize = 14.sp,
+            textAlign = TextAlign.Center
         )
     }
 }
 
 @Composable
-private fun ConversationBubbles(
-    recognizedText: String,
-    responseText: String
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
+fun MicrophoneButton(state: AssistantState, onListenClick: () -> Unit) {
+    val isListening = state == AssistantState.LISTENING
+    val infiniteTransition = rememberInfiniteTransition(label = "mic")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = if (isListening) 1.2f else 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
+    )
+
+    Box(
+        modifier = Modifier
+            .size(120.dp)
+            .scale(pulseScale)
+            .background(
+                brush = Brush.radialGradient(MicrophoneGradient),
+                shape = CircleShape
+            )
+            .clickable(enabled = state != AssistantState.PROCESSING) { onListenClick() },
+        contentAlignment = Alignment.Center
     ) {
-        if (recognizedText.isNotBlank()) {
-            Bubble(label = RECOGNIZED_LABEL, text = recognizedText)
-            Spacer(modifier = Modifier.height(12.dp))
-        }
-        if (responseText.isNotBlank()) {
-            Bubble(label = RESPONSE_LABEL, text = responseText)
-        }
+        Icon(
+            painter = painterResource(id = R.drawable.ic_mic),
+            contentDescription = "Microphone",
+            tint = Color.White,
+            modifier = Modifier.size(56.dp)
+        )
     }
 }
-
-@Composable
-private fun Bubble(label: String, text: String) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.15f))
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = Color.White.copy(alpha = 0.7f)
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = text,
-                style = MaterialTheme.typography.bodyLarge,
-                color = Color.White
-            )
-        }
-    }
-}
-
-private fun statusTextFor(state: AssistantState): String = when (state) {
-    AssistantState.IDLE -> "المساعد جاهز"
-    AssistantState.LISTENING -> "جارٍ الاستماع..."
-    AssistantState.PROCESSING -> "جارٍ المعالجة..."
-    AssistantState.SUCCESS -> "تمت المهمة بنجاح"
-    AssistantState.ERROR -> "حدث خطأ ما"
-}
-
-private const val APP_TITLE = "رفيق"
-private const val LISTEN_LABEL = "استمع"
-private const val RECOGNIZED_LABEL = "سمعت"
-private const val RESPONSE_LABEL = "رفيق"

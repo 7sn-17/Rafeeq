@@ -23,8 +23,8 @@ android {
         applicationId = "com.rafeeq.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2"
+        versionCode = 3
+        versionName = "0.3"
 
         // Exposed to Kotlin as BuildConfig.GEMINI_API_KEY.
         buildConfigField("String", "GEMINI_API_KEY", "\"${properties["GEMINI_API_KEY"] ?: ""}\"")

@@ -19,26 +19,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * Moves every image from the shared MediaStore into a sorted sub-directory inside `Pictures`:
- *
- * - `sortBy = "date"` → `Pictures/Sorted/<yyyy-MM-dd>/`
- * - `sortBy = "size"` → `Pictures/Sorted/<Small|Medium|Large>/`
- *
- * The skill is invoked by [SkillManager] once Gemini has classified the user's command;
- * [execute] performs the actual work and returns how many images were moved.
- */
 class OrganizeImagesSkill(context: Context) {
-
     private val appContext = context.applicationContext
 
-    /**
-     * Moves all images into their sorted folder.
-     *
-     * @param sortBy `"date"` (the default) or `"size"`.
-     * @return the number of images that were moved successfully.
-     */
+    var progressCallback: ((ProcessingState, Map<String, String>) -> Unit)? = null
+
     suspend fun execute(sortBy: String = SORT_BY_DATE): Int = withContext(Dispatchers.IO) {
+        progressCallback?.invoke(ProcessingState.SEARCHING_FILES, emptyMap())
         if (!hasMediaReadPermission()) {
             Log.w(TAG, "Media read permission is not granted; skipping image organization")
             return@withContext 0
@@ -47,8 +34,12 @@ class OrganizeImagesSkill(context: Context) {
         var totalCount = 0
         var movedCount = 0
         try {
-            for (image in queryImages()) {
-                totalCount++
+            val images = queryImages()
+            totalCount = images.size
+            if (totalCount > 0) {
+                progressCallback?.invoke(ProcessingState.MOVING_FILES, mapOf("count" to totalCount.toString()))
+            }
+            for (image in images) {
                 try {
                     if (moveImage(image, targetFolderFor(image, sortBy))) {
                         movedCount++
@@ -62,10 +53,9 @@ class OrganizeImagesSkill(context: Context) {
         }
 
         Log.i(TAG, "Image organization finished: moved $movedCount of $totalCount images")
+        progressCallback?.invoke(ProcessingState.COMPLETED, emptyMap())
         movedCount
     }
-
-    // region permissions
 
     private fun hasMediaReadPermission(): Boolean {
         val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -73,13 +63,8 @@ class OrganizeImagesSkill(context: Context) {
         } else {
             Manifest.permission.READ_EXTERNAL_STORAGE
         }
-        return ContextCompat.checkSelfPermission(appContext, permission) ==
-            PackageManager.PERMISSION_GRANTED
+        return ContextCompat.checkSelfPermission(appContext, permission) == PackageManager.PERMISSION_GRANTED
     }
-
-    // endregion
-
-    // region querying
 
     private fun queryImages(): List<ImageEntry> {
         val images = mutableListOf<ImageEntry>()
@@ -120,7 +105,6 @@ class OrganizeImagesSkill(context: Context) {
                     null
                 }
 
-                // Images that are already organized would otherwise be processed again.
                 if (isAlreadySorted(filePath)) continue
 
                 val dateMillis = if (dateTakenIndex >= 0 && !cursor.isNull(dateTakenIndex)) {
@@ -157,10 +141,6 @@ class OrganizeImagesSkill(context: Context) {
         return filePath.startsWith(sortedDirectory.absolutePath + File.separator)
     }
 
-    // endregion
-
-    // region moving
-
     private fun moveImage(image: ImageEntry, targetFolder: String): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             moveUsingMediaStore(image, targetFolder)
@@ -168,10 +148,6 @@ class OrganizeImagesSkill(context: Context) {
             moveUsingFileSystem(image, targetFolder)
         }
 
-    /**
-     * Scoped storage path (Android 10+): ask MediaStore to relocate the file, and fall back to
-     * "copy into the sorted folder + delete the original" when the move is not allowed directly.
-     */
     private fun moveUsingMediaStore(image: ImageEntry, targetFolder: String): Boolean {
         val relativePath = "$PICTURES_DIR/$SORTED_DIR/$targetFolder"
 
@@ -180,11 +156,10 @@ class OrganizeImagesSkill(context: Context) {
                 put(MediaStore.Images.Media.RELATIVE_PATH, relativePath)
             }
             if (appContext.contentResolver.update(image.uri, values, null, null) > 0) {
-                Log.d(TAG, "Moved '${image.displayName}' via MediaStore RELATIVE_PATH update")
                 return true
             }
         } catch (e: SecurityException) {
-            Log.d(TAG, "RELATIVE_PATH update rejected for '${image.displayName}'; copying instead")
+            Log.d(TAG, "RELATIVE_PATH update rejected for '${image.displayName}'")
         }
 
         val copyUri = copyIntoSortedFolder(image, relativePath) ?: return false
@@ -192,8 +167,6 @@ class OrganizeImagesSkill(context: Context) {
             return true
         }
 
-        // The original could not be removed, so drop the copy to avoid leaving duplicates behind.
-        Log.w(TAG, "Could not delete the original '${image.displayName}'; rolling back the copy")
         deleteQuietly(copyUri)
         return false
     }
@@ -212,24 +185,14 @@ class OrganizeImagesSkill(context: Context) {
         val targetUri = appContext.contentResolver.insert(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
             values
-        )
-        if (targetUri == null) {
-            Log.w(TAG, "MediaStore refused to create a copy of '${image.displayName}'")
-            return null
-        }
+        ) ?: return null
 
         var copied = false
         try {
-            val input = appContext.contentResolver.openInputStream(image.uri)
-            if (input != null) {
-                input.use { source ->
-                    val output = appContext.contentResolver.openOutputStream(targetUri)
-                    if (output != null) {
-                        output.use { destination ->
-                            source.copyTo(destination)
-                            copied = true
-                        }
-                    }
+            appContext.contentResolver.openInputStream(image.uri)?.use { source ->
+                appContext.contentResolver.openOutputStream(targetUri)?.use { destination ->
+                    source.copyTo(destination)
+                    copied = true
                 }
             }
         } catch (e: Exception) {
@@ -255,7 +218,6 @@ class OrganizeImagesSkill(context: Context) {
     private fun deleteOriginal(image: ImageEntry): Boolean = try {
         appContext.contentResolver.delete(image.uri, null, null) > 0
     } catch (e: SecurityException) {
-        Log.w(TAG, "Deleting the original '${image.displayName}' is not allowed")
         false
     }
 
@@ -267,47 +229,23 @@ class OrganizeImagesSkill(context: Context) {
         }
     }
 
-    /**
-     * Legacy storage path (Android 9 and below): rename the file on disk and let the media
-     * scanner pick up the new location.
-     */
     private fun moveUsingFileSystem(image: ImageEntry, targetFolder: String): Boolean {
-        val filePath = image.filePath
-        if (filePath.isNullOrBlank()) {
-            Log.w(TAG, "No file path known for '${image.displayName}'")
-            return false
-        }
-
+        val filePath = image.filePath ?: return false
         val source = File(filePath)
-        if (!source.exists()) {
-            Log.w(TAG, "Source file does not exist: $filePath")
-            return false
-        }
+        if (!source.exists()) return false
 
         val targetDir = File(picturesDirectory(), "$SORTED_DIR/$targetFolder")
-        if (!targetDir.exists() && !targetDir.mkdirs()) {
-            Log.e(TAG, "Could not create directory $targetDir")
-            return false
-        }
+        if (!targetDir.exists() && !targetDir.mkdirs()) return false
 
         val target = uniqueTargetFile(targetDir, image.displayName)
-        if (!source.renameTo(target)) {
-            Log.w(TAG, "Could not rename '$filePath' to '${target.absolutePath}'")
-            return false
-        }
+        if (!source.renameTo(target)) return false
 
-        // Drop the stale MediaStore row when allowed, then index the new location.
         try {
             appContext.contentResolver.delete(image.uri, null, null)
         } catch (e: SecurityException) {
-            Log.d(TAG, "Stale MediaStore row for '${image.displayName}' left to the media scanner")
+            Log.d(TAG, "Stale MediaStore row for '${image.displayName}' left")
         }
-        MediaScannerConnection.scanFile(
-            appContext,
-            arrayOf(target.absolutePath),
-            arrayOf(image.mimeType),
-            null
-        )
+        MediaScannerConnection.scanFile(appContext, arrayOf(target.absolutePath), arrayOf(image.mimeType), null)
         return true
     }
 
@@ -332,7 +270,6 @@ class OrganizeImagesSkill(context: Context) {
     private fun picturesDirectory(): File =
         Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
 
-    /** Folder name for [image] depending on the requested [sortBy] strategy. */
     private fun targetFolderFor(image: ImageEntry, sortBy: String): String =
         if (sortBy.equals(SORT_BY_SIZE, ignoreCase = true)) {
             sizeFolder(image.sizeBytes)
@@ -346,8 +283,6 @@ class OrganizeImagesSkill(context: Context) {
         else -> SIZE_FOLDER_LARGE
     }
 
-    // endregion
-
     private data class ImageEntry(
         val uri: Uri,
         val displayName: String,
@@ -358,26 +293,17 @@ class OrganizeImagesSkill(context: Context) {
         val sizeBytes: Long
     )
 
-    private companion object {
+    companion object {
         const val TAG = "OrganizeImagesSkill"
-
-        /** Folder created inside `Pictures` that holds the sorted sub-directories. */
         const val SORTED_DIR = "Sorted"
-
         val PICTURES_DIR = Environment.DIRECTORY_PICTURES
-
         const val DATE_PATTERN = "yyyy-MM-dd"
-
         const val MILLIS_PER_SECOND = 1000L
-
         const val SORT_BY_DATE = "date"
         const val SORT_BY_SIZE = "size"
-
-        /** Buckets used when sorting by size (see [SMALL_IMAGE_MAX_BYTES]). */
         const val SIZE_FOLDER_SMALL = "Small"
         const val SIZE_FOLDER_MEDIUM = "Medium"
         const val SIZE_FOLDER_LARGE = "Large"
-
         const val SMALL_IMAGE_MAX_BYTES = 1L * 1024 * 1024
         const val MEDIUM_IMAGE_MAX_BYTES = 5L * 1024 * 1024
     }

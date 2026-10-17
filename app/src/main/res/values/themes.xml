@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Base application theme; the UI itself is styled by Jetpack Compose. -->
-    <style name="Theme.Rafeeq" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Base application theme; the UI itself is styled by Jetpack Compose.
+         Material Components supplies the Material 3 XML theme used for the window. -->
+    <style name="Theme.Rafeeq" parent="Theme.Material3.DayNight.NoActionBar" />
 </resources>

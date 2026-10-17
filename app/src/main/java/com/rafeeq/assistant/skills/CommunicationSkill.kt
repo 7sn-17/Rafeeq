@@ -53,36 +53,42 @@ class CommunicationSkill(context: Context) {
     }
 
     private suspend fun findContactPhoneNumber(name: String): String? = withContext(Dispatchers.IO) {
-        val uri = Uri.withAppendedPath(
-            ContactsContract.Contacts.CONTENT_FILTER_URI,
-            Uri.encode(name)
-        )
-        var phoneNumber: String? = null
-        appContext.contentResolver.query(
-            uri,
-            arrayOf(ContactsContract.Contacts._ID),
-            null,
-            null,
-            null
-        )?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val id = cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.Contacts._ID))
-                appContext.contentResolver.query(
-                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                    arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
-                    "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?",
-                    arrayOf(id),
-                    null
-                )?.use { phoneCursor ->
-                    if (phoneCursor.moveToFirst() && phoneNumber == null) {
-                        phoneNumber = phoneCursor.getString(
-                            phoneCursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
-                        )
+        try {
+            val uri = Uri.withAppendedPath(
+                ContactsContract.Contacts.CONTENT_FILTER_URI,
+                Uri.encode(name)
+            )
+            var phoneNumber: String? = null
+            appContext.contentResolver.query(
+                uri,
+                arrayOf(ContactsContract.Contacts._ID),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.Contacts._ID))
+                    appContext.contentResolver.query(
+                        ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                        arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
+                        "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?",
+                        arrayOf(id),
+                        null
+                    )?.use { phoneCursor ->
+                        if (phoneCursor.moveToFirst() && phoneNumber == null) {
+                            phoneNumber = phoneCursor.getString(
+                                phoneCursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                            )
+                        }
                     }
                 }
             }
+            phoneNumber
+        } catch (e: Exception) {
+            // READ_CONTACTS may be missing, or the provider may be unavailable.
+            Log.e(TAG, "Failed to look up contact \"$name\"", e)
+            null
         }
-        phoneNumber
     }
 
     companion object {

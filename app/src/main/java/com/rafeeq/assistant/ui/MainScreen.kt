@@ -32,6 +32,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -64,9 +65,11 @@ fun MainScreen(
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
+    // The trailing item is the optional inline error bubble, so include it in the count.
+    val itemCount = messages.size + if (errorMessage.isNotEmpty()) 1 else 0
+    LaunchedEffect(itemCount) {
+        if (itemCount > 0) {
+            listState.animateScrollToItem(itemCount - 1)
         }
     }
 
@@ -168,6 +171,7 @@ fun ProcessingStatus(state: AssistantState) {
 @Composable
 fun MicrophoneButton(state: AssistantState, onListenClick: () -> Unit) {
     val isListening = state == AssistantState.LISTENING
+    val isEnabled = state != AssistantState.PROCESSING && state != AssistantState.LISTENING
     val infiniteTransition = rememberInfiniteTransition(label = "mic")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1f,
@@ -183,11 +187,12 @@ fun MicrophoneButton(state: AssistantState, onListenClick: () -> Unit) {
         modifier = Modifier
             .size(120.dp)
             .scale(pulseScale)
+            .alpha(if (isEnabled) 1f else 0.6f)
             .background(
                 brush = Brush.radialGradient(MicrophoneGradient),
                 shape = CircleShape
             )
-            .clickable(enabled = state != AssistantState.PROCESSING) { onListenClick() },
+            .clickable(enabled = isEnabled) { onListenClick() },
         contentAlignment = Alignment.Center
     ) {
         Icon(

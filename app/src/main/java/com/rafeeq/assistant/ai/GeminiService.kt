@@ -49,6 +49,7 @@ class GeminiService {
         }
 
     suspend fun interpret(userSpeech: String): AssistantRequest {
+        if (userSpeech.isBlank()) return AssistantRequest.Unknown
         val generativeModel = model ?: return AssistantRequest.Talk("يحتاج التطبيق لمفتاح Gemini في local.properties")
         return try {
             val response = generativeModel.generateContent(userSpeech)

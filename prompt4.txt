@@ -1,0 +1,26 @@
+We are building v0.3.5: The Stabilization & Absolute Fix Update. We need a zero-error build, full icon replacement, and complete code audit.
+
+1. **Deep Clean & Icon Regeneration (CRITICAL)**:
+   - I have placed a high-quality image at the root named `rafeeq_icon.png`.
+   - **DELETE** all files inside `app/src/main/res/mipmap-mdpi/`, `mipmap-hdpi/`, `mipmap-xhdpi/`, `mipmap-xxhdpi/`, and `mipmap-xxxhdpi/`. Do not leave any old PNGs.
+   - Write and execute a Python script (or use ImageMagick) to generate new `ic_launcher.png` files from `rafeeq_icon.png` with the following sizes: 48x48, 72x72, 96x96, 144x144, and 192x192. Place them in their respective folders.
+   - Recreate `mipmap-anydpi-v26/ic_launcher.xml` and `ic_launcher_round.xml` to correctly reference these new icons.
+
+2. **Fix "Parse Error / App Not Installed" (CRITICAL)**:
+   - Check `app/src/main/res/values/themes.xml`. Ensure the theme `Theme.Rafeeq` exists and inherits from `Theme.Material3.DayNight.NoActionBar` (or a valid Material3 theme). If it doesn't exist, create it.
+   - Double-check `AndroidManifest.xml`: Ensure the `android:theme` is set to `@style/Theme.Rafeeq`. Ensure the `android:name=".service.RafeeqBackgroundService"` matches the actual file location.
+   - Check `app/build.gradle.kts`: Verify `namespace` and `applicationId` are exactly `com.rafeeq.assistant`. Ensure no syntax errors exist.
+
+3. **Comprehensive Code Audit & Crash Prevention**:
+   - Scan all Kotlin files for compilation errors, missing imports (e.g., `PackageManager`), or unhandled coroutines.
+   - In `GeminiService.kt`, ensure the API key reads correctly from `BuildConfig` and handles null/empty responses gracefully.
+   - In `RafeeqBackgroundService.kt`, ensure the foreground notification is built correctly for Android 13+ (requires `POST_NOTIFICATIONS`).
+   - In `CommunicationSkill.kt` and `DeviceSettingsSkill.kt`, add try-catch blocks to prevent crashes if the device doesn't support a feature.
+
+4. **UI Polish**:
+   - In `MainScreen.kt`, ensure the `LazyColumn` scrolls to the bottom automatically when a new message arrives.
+   - Disable the microphone button while the assistant state is `PROCESSING` or `LISTENING`.
+
+5. **Finalize**:
+   - Do NOT build locally.
+   - Once all files are audited, fixed, and icons are generated, use your Git tools to stage all changes, commit with the Arabic message "إصدار 0.3.5: تنظيف الأيقونات، إصلاح الثيمات، وفحص شامل للكود", and push to origin main.

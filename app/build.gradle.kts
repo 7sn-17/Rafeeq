@@ -23,8 +23,8 @@ android {
         applicationId = "com.rafeeq.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.3"
+        versionCode = 4
+        versionName = "0.3.5"
 
         // Exposed to Kotlin as BuildConfig.GEMINI_API_KEY.
         buildConfigField("String", "GEMINI_API_KEY", "\"${properties["GEMINI_API_KEY"] ?: ""}\"")
@@ -78,4 +78,8 @@ dependencies {
 
     // Google Generative AI (Gemini)
     implementation("com.google.ai.client.generativeai:generativeai:0.7.0")
+
+    // Material Components: supplies the Material 3 XML theme (Theme.Material3.*)
+    // that Theme.Rafeeq inherits from. Jetpack Compose ships no XML themes itself.
+    implementation("com.google.android.material:material:1.12.0")
 }

@@ -42,6 +42,12 @@ class MainActivity : ComponentActivity() {
             audioPermissionLauncher.launch(permission)
         }
 
+        // Skills (e.g. the image organiser) request their permissions through the
+        // multiple-permission launcher, whose results are routed back to SkillManager.
+        mainViewModel.setSkillPermissionRequester { permission ->
+            multiPermissionLauncher.launch(arrayOf(permission))
+        }
+
         requestNotificationPermissionIfNeeded()
         startBackgroundServiceIfNeeded()
 

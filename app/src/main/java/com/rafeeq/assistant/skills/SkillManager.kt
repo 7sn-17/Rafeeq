@@ -5,6 +5,7 @@ import com.rafeeq.assistant.permissions.PermissionsManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
@@ -29,6 +30,13 @@ class SkillManager(
 ) {
     private val pendingAction = AtomicReference<PendingAction?>(null)
     private val scope = CoroutineScope(Dispatchers.Main.immediate)
+
+    /**
+     * Bound by the Activity to an Android permission launcher so a skill that is missing a
+     * permission can show the real system dialog and suspend until the user answers.
+     * Without this binding, permission requests fail gracefully instead of hanging.
+     */
+    var permissionRequester: ((String) -> Unit)? = null
 
     data class PendingAction(
         val continuation: Continuation<Boolean>,
@@ -84,25 +92,46 @@ class SkillManager(
         }
     }
 
+    /**
+     * Asks for [permission] through the bound Android permission launcher and suspends until
+     * the system dialog returns, so the caller can surface [errorMessage] when it is denied.
+     */
     private suspend fun requestPermissionWithMessage(permission: String, errorMessage: String): Boolean {
-        return if (permissionsManager.hasRecordAudioPermission()) {
-            // just check
-            true
-        } else {
-            // Simplified: assume granted via external flow; return false gracefully
-            Log.w(TAG, "Permission $permission not granted")
-            false
+        if (permissionsManager.hasPermission(permission)) return true
+
+        val requester = permissionRequester
+        if (requester == null) {
+            Log.w(TAG, "No permission requester bound for $permission")
+            return false
+        }
+
+        return suspendCancellableCoroutine { continuation ->
+            pendingAction.set(PendingAction(continuation, permission, errorMessage))
+            continuation.invokeOnCancellation {
+                pendingAction.get()?.let { pending ->
+                    if (pending.continuation === continuation) {
+                        pendingAction.compareAndSet(pending, null)
+                    }
+                }
+            }
+            try {
+                requester(permission)
+            } catch (e: Exception) {
+                // The dialog could not be shown (e.g. called from the wrong context).
+                Log.e(TAG, "Could not launch the request for $permission", e)
+                pendingAction.set(null)
+                continuation.resume(false)
+            }
         }
     }
 
     fun onPermissionResult(permission: String, isGranted: Boolean) {
-        val pending = pendingAction.getAndSet(null)
-        pending?.let {
-            if (it.permission == permission) {
-                scope.launch {
-                    it.continuation.resume(isGranted)
-                }
-            }
+        val pending = pendingAction.get() ?: return
+        // Only the waiter for this exact permission may resume; anything else is ignored.
+        if (pending.permission != permission) return
+        if (!pendingAction.compareAndSet(pending, null)) return
+        scope.launch {
+            pending.continuation.resume(isGranted)
         }
     }
 

@@ -1,7 +1,7 @@
 package com.rafeeq.assistant.core
 
 import android.content.Context
-import com.rafeeq.assistant.ai.GeminiService
+import com.rafeeq.assistant.ai.AiService
 import com.rafeeq.assistant.permissions.PermissionsManager
 import com.rafeeq.assistant.skills.CommunicationSkill
 import com.rafeeq.assistant.skills.DeviceSettingsSkill
@@ -40,7 +40,7 @@ class AssistantEngine(private val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val permissionsManager = PermissionsManager(context)
     private val voiceRecognitionManager = VoiceRecognitionManager(context)
-    private val geminiService = GeminiService()
+    private val aiService = AiService()
     private val organizeImagesSkill = OrganizeImagesSkill(context)
     private val communicationSkill = CommunicationSkill(context)
     private val deviceSettingsSkill = DeviceSettingsSkill(context)
@@ -121,7 +121,7 @@ class AssistantEngine(private val context: Context) {
         _state.value = AssistantState.ANALYZING
 
         try {
-            val request = geminiService.interpret(speech)
+            val request = aiService.interpret(speech)
             respond(request)
         } catch (e: Exception) {
             respond(SkillResult("عذراً، حدث خطأ غير متوقع", success = false))
@@ -179,6 +179,11 @@ class AssistantEngine(private val context: Context) {
     fun setPermissionRequester(requester: (String) -> Unit) {
         audioPermissionRequester = requester
         voiceRecognitionManager.permissionRequester = requester
+    }
+
+    /** Lets skills show the real Android permission dialog instead of just failing. */
+    fun setSkillPermissionRequester(requester: (String) -> Unit) {
+        skillManager.permissionRequester = requester
     }
 
     fun destroy() {

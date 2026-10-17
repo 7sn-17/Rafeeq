@@ -34,6 +34,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         engine.setPermissionRequester(requester)
     }
 
+    fun setSkillPermissionRequester(requester: (String) -> Unit) {
+        engine.setSkillPermissionRequester(requester)
+    }
+
     fun onAudioPermissionResult(isGranted: Boolean) {
         engine.onAudioPermissionResult(isGranted)
     }

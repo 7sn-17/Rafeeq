@@ -1,0 +1,28 @@
+We are migrating the app's brain to Groq API (OpenAI-compatible) because Google is geo-blocked. We need a robust Fallback Mechanism.
+
+1. **Dependencies & Keys**:
+   - Remove the Google Generative AI dependency from `app/build.gradle.kts`.
+   - Add Retrofit2, converter-gson, and okhttp3 dependencies.
+   - Update `build.gradle.kts` to read `GROQ_API_KEY` from `local.properties` (ensure `local.properties` has `GROQ_API_KEY=gsk_...`).
+
+2. **Rewrite the AI Service (`AiService.kt`)**:
+   - Base URL: `https://api.groq.com/openai/v1/`
+   - Endpoint: `chat/completions`
+   - Headers: `Authorization: Bearer <GROQ_API_KEY>`, `Content-Type: application/json`.
+   - Convert our Kotlin functions (organizeImages, callContact, etc.) into the OpenAI Tools JSON format expected by Groq.
+
+3. **Implement Fallback Logic (CRITICAL)**:
+   - Create a list of models to try in order:
+     1. `openai/gpt-oss-20b` (Fast, efficient)
+     2. `qwen/qwen3.8-27b` (Alternative)
+     3. `openai/gpt-oss-120b` (Heavy, smart, last resort)
+   - Wrap the Retrofit call in a `try-catch` loop. If a model fails (e.g., 429 Too Many Requests, or 500 Server Error), catch the exception and immediately retry the request with the next model in the list.
+   - If all models fail, return a graceful error message to the ViewModel so the UI can show: "عذراً، خوادم الذكاء الاصطناعي مشغولة حالياً، يرجى المحاولة بعد قليل".
+
+4. **Update SkillManager & ViewModel**:
+   - Ensure the new `AiService` parses `choices[0].message.tool_calls` correctly.
+   - Remove all Google SDK imports.
+
+5. **Finalize**:
+   - Do NOT build locally.
+   - Commit and push with the message: "ترقية: الانتقال إلى Groq API مع نظام النماذج البديلة (Fallback)".

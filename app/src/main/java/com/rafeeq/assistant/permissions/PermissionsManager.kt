@@ -19,6 +19,12 @@ class PermissionsManager(private val context: Context) {
 
     fun getRecordAudioPermission(): String = Manifest.permission.RECORD_AUDIO
 
+    /** Generic check for when the permission string is already known at runtime. */
+    fun hasPermission(permission: String): Boolean = ContextCompat.checkSelfPermission(
+        appContext,
+        permission
+    ) == PackageManager.PERMISSION_GRANTED
+
     fun hasReadMediaImagesPermission(): Boolean {
         val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Manifest.permission.READ_MEDIA_IMAGES

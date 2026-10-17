@@ -6,7 +6,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// The Gemini API key lives in local.properties (which is never committed) so it stays
+// API keys live in local.properties (which is never committed) so they stay
 // out of version control, out of the APK sources and out of the build scripts.
 val properties = Properties().apply {
     val localPropertiesFile = rootProject.file("local.properties")
@@ -26,8 +26,8 @@ android {
         versionCode = 4
         versionName = "0.3.5"
 
-        // Exposed to Kotlin as BuildConfig.GEMINI_API_KEY.
-        buildConfigField("String", "GEMINI_API_KEY", "\"${properties["GEMINI_API_KEY"] ?: ""}\"")
+        // Exposed to Kotlin as BuildConfig.GROQ_API_KEY (Groq, OpenAI-compatible).
+        buildConfigField("String", "GROQ_API_KEY", "\"${properties["GROQ_API_KEY"] ?: ""}\"")
     }
 
     buildTypes {
@@ -76,8 +76,10 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
-    // Google Generative AI (Gemini)
-    implementation("com.google.ai.client.generativeai:generativeai:0.7.0")
+    // Groq (OpenAI-compatible HTTP API)
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // Material Components: supplies the Material 3 XML theme (Theme.Material3.*)
     // that Theme.Rafeeq inherits from. Jetpack Compose ships no XML themes itself.

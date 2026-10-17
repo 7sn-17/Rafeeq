@@ -1,11 +1,11 @@
-package com.example.androidassistant.ui
+package com.rafeeq.assistant.ui
 
 import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.androidassistant.skills.OrganizeImagesSkill
-import com.example.androidassistant.voice.VoiceRecognitionManager
+import com.rafeeq.assistant.skills.OrganizeImagesSkill
+import com.rafeeq.assistant.voice.VoiceRecognitionManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

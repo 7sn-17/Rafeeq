@@ -1,4 +1,4 @@
-package com.example.androidassistant.skills
+package com.rafeeq.assistant.skills
 
 import android.Manifest
 import android.content.ContentUris

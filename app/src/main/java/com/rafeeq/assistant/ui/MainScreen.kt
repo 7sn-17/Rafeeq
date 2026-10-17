@@ -1,4 +1,4 @@
-package com.example.androidassistant.ui
+package com.rafeeq.assistant.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column

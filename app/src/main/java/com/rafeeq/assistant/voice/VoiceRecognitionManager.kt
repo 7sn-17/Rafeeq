@@ -1,4 +1,4 @@
-package com.example.androidassistant.voice
+package com.rafeeq.assistant.voice
 
 import android.Manifest
 import android.content.Context

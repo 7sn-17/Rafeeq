@@ -1,4 +1,4 @@
-package com.example.androidassistant
+package com.rafeeq.assistant
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -8,8 +8,8 @@ import androidx.activity.viewModels
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.androidassistant.ui.MainScreen
-import com.example.androidassistant.ui.MainViewModel
+import com.rafeeq.assistant.ui.MainScreen
+import com.rafeeq.assistant.ui.MainViewModel
 
 /**
  * Single activity entry point. The activity is only responsible for wiring the runtime

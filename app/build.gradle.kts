@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.androidassistant"
+    namespace = "com.rafeeq.assistant"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.androidassistant"
+        applicationId = "com.rafeeq.assistant"
         minSdk = 26
         targetSdk = 34
         versionCode = 1

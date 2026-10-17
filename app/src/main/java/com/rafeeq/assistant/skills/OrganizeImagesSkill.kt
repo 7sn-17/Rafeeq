@@ -20,25 +20,25 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Moves every image from the shared MediaStore into date based sub-directories inside
- * `Pictures/Sorted/<yyyy-MM-dd>/`.
+ * Moves every image from the shared MediaStore into a sorted sub-directory inside `Pictures`:
  *
- * The skill is triggered by [matches] when the recognized text contains one of the
- * [TRIGGER_PHRASES]; [execute] performs the actual work and returns how many images were moved.
+ * - `sortBy = "date"` → `Pictures/Sorted/<yyyy-MM-dd>/`
+ * - `sortBy = "size"` → `Pictures/Sorted/<Small|Medium|Large>/`
+ *
+ * The skill is invoked by [SkillManager] once Gemini has classified the user's command;
+ * [execute] performs the actual work and returns how many images were moved.
  */
 class OrganizeImagesSkill(context: Context) {
 
     private val appContext = context.applicationContext
 
-    /** True when the recognized [query] contains one of the trigger phrases. */
-    fun matches(query: String): Boolean = TRIGGER_PHRASES.any { query.contains(it) }
-
     /**
-     * Moves all images into their date based folder.
+     * Moves all images into their sorted folder.
      *
+     * @param sortBy `"date"` (the default) or `"size"`.
      * @return the number of images that were moved successfully.
      */
-    suspend fun execute(): Int = withContext(Dispatchers.IO) {
+    suspend fun execute(sortBy: String = SORT_BY_DATE): Int = withContext(Dispatchers.IO) {
         if (!hasMediaReadPermission()) {
             Log.w(TAG, "Media read permission is not granted; skipping image organization")
             return@withContext 0
@@ -50,7 +50,7 @@ class OrganizeImagesSkill(context: Context) {
             for (image in queryImages()) {
                 totalCount++
                 try {
-                    if (moveImage(image)) {
+                    if (moveImage(image, targetFolderFor(image, sortBy))) {
                         movedCount++
                     }
                 } catch (e: Exception) {
@@ -89,7 +89,8 @@ class OrganizeImagesSkill(context: Context) {
             MediaStore.Images.Media.MIME_TYPE,
             MediaStore.Images.Media.DATE_TAKEN,
             MediaStore.Images.Media.DATE_ADDED,
-            MediaStore.Images.Media.DATA
+            MediaStore.Images.Media.DATA,
+            MediaStore.Images.Media.SIZE
         )
         val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
         val dateFolderFormat = SimpleDateFormat(DATE_PATTERN, Locale.US)
@@ -107,6 +108,7 @@ class OrganizeImagesSkill(context: Context) {
             val mimeTypeIndex = cursor.getColumnIndex(MediaStore.Images.Media.MIME_TYPE)
             val dateTakenIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN)
             val dataIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATA)
+            val sizeIndex = cursor.getColumnIndex(MediaStore.Images.Media.SIZE)
 
             while (cursor.moveToNext()) {
                 val displayName = cursor.getString(nameIndex)
@@ -137,7 +139,12 @@ class OrganizeImagesSkill(context: Context) {
                     mimeType = if (mimeTypeIndex >= 0) cursor.getString(mimeTypeIndex) else null,
                     dateMillis = dateMillis,
                     dateFolder = dateFolderFormat.format(Date(dateMillis)),
-                    filePath = filePath
+                    filePath = filePath,
+                    sizeBytes = if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
+                        cursor.getLong(sizeIndex)
+                    } else {
+                        0L
+                    }
                 )
             }
         }
@@ -154,19 +161,19 @@ class OrganizeImagesSkill(context: Context) {
 
     // region moving
 
-    private fun moveImage(image: ImageEntry): Boolean =
+    private fun moveImage(image: ImageEntry, targetFolder: String): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            moveUsingMediaStore(image)
+            moveUsingMediaStore(image, targetFolder)
         } else {
-            moveUsingFileSystem(image)
+            moveUsingFileSystem(image, targetFolder)
         }
 
     /**
      * Scoped storage path (Android 10+): ask MediaStore to relocate the file, and fall back to
      * "copy into the sorted folder + delete the original" when the move is not allowed directly.
      */
-    private fun moveUsingMediaStore(image: ImageEntry): Boolean {
-        val relativePath = "$PICTURES_DIR/$SORTED_DIR/${image.dateFolder}"
+    private fun moveUsingMediaStore(image: ImageEntry, targetFolder: String): Boolean {
+        val relativePath = "$PICTURES_DIR/$SORTED_DIR/$targetFolder"
 
         try {
             val values = ContentValues().apply {
@@ -264,7 +271,7 @@ class OrganizeImagesSkill(context: Context) {
      * Legacy storage path (Android 9 and below): rename the file on disk and let the media
      * scanner pick up the new location.
      */
-    private fun moveUsingFileSystem(image: ImageEntry): Boolean {
+    private fun moveUsingFileSystem(image: ImageEntry, targetFolder: String): Boolean {
         val filePath = image.filePath
         if (filePath.isNullOrBlank()) {
             Log.w(TAG, "No file path known for '${image.displayName}'")
@@ -277,7 +284,7 @@ class OrganizeImagesSkill(context: Context) {
             return false
         }
 
-        val targetDir = File(picturesDirectory(), "$SORTED_DIR/${image.dateFolder}")
+        val targetDir = File(picturesDirectory(), "$SORTED_DIR/$targetFolder")
         if (!targetDir.exists() && !targetDir.mkdirs()) {
             Log.e(TAG, "Could not create directory $targetDir")
             return false
@@ -325,6 +332,20 @@ class OrganizeImagesSkill(context: Context) {
     private fun picturesDirectory(): File =
         Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
 
+    /** Folder name for [image] depending on the requested [sortBy] strategy. */
+    private fun targetFolderFor(image: ImageEntry, sortBy: String): String =
+        if (sortBy.equals(SORT_BY_SIZE, ignoreCase = true)) {
+            sizeFolder(image.sizeBytes)
+        } else {
+            image.dateFolder
+        }
+
+    private fun sizeFolder(sizeBytes: Long): String = when {
+        sizeBytes < SMALL_IMAGE_MAX_BYTES -> SIZE_FOLDER_SMALL
+        sizeBytes < MEDIUM_IMAGE_MAX_BYTES -> SIZE_FOLDER_MEDIUM
+        else -> SIZE_FOLDER_LARGE
+    }
+
     // endregion
 
     private data class ImageEntry(
@@ -333,13 +354,14 @@ class OrganizeImagesSkill(context: Context) {
         val mimeType: String?,
         val dateMillis: Long,
         val dateFolder: String,
-        val filePath: String?
+        val filePath: String?,
+        val sizeBytes: Long
     )
 
     private companion object {
         const val TAG = "OrganizeImagesSkill"
 
-        /** Folder created inside `Pictures` that holds the date based sub-directories. */
+        /** Folder created inside `Pictures` that holds the sorted sub-directories. */
         const val SORTED_DIR = "Sorted"
 
         val PICTURES_DIR = Environment.DIRECTORY_PICTURES
@@ -348,7 +370,15 @@ class OrganizeImagesSkill(context: Context) {
 
         const val MILLIS_PER_SECOND = 1000L
 
-        /** Voice commands that trigger this skill. */
-        val TRIGGER_PHRASES = listOf("نظم الصور", "رتّب الصور")
+        const val SORT_BY_DATE = "date"
+        const val SORT_BY_SIZE = "size"
+
+        /** Buckets used when sorting by size (see [SMALL_IMAGE_MAX_BYTES]). */
+        const val SIZE_FOLDER_SMALL = "Small"
+        const val SIZE_FOLDER_MEDIUM = "Medium"
+        const val SIZE_FOLDER_LARGE = "Large"
+
+        const val SMALL_IMAGE_MAX_BYTES = 1L * 1024 * 1024
+        const val MEDIUM_IMAGE_MAX_BYTES = 5L * 1024 * 1024
     }
 }

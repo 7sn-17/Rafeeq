@@ -7,6 +7,16 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <!-- Gemini intent analysis is performed over the network. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Required to discover the system TextToSpeech engine on Android 11+. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:label="رفيق"

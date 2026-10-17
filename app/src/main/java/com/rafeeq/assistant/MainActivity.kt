@@ -38,8 +38,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 val state by mainViewModel.state.collectAsStateWithLifecycle()
+                val recognizedText by mainViewModel.recognizedText.collectAsStateWithLifecycle()
+                val responseText by mainViewModel.responseText.collectAsStateWithLifecycle()
                 MainScreen(
                     state = state,
+                    recognizedText = recognizedText,
+                    responseText = responseText,
                     onListenClick = mainViewModel::startListening
                 )
             }

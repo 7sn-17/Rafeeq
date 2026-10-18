@@ -1,5 +1,6 @@
 package com.rafeeq.assistant.ui
 
+import android.provider.Settings
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -71,6 +72,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -423,6 +425,18 @@ private fun InputBar(
     var text by rememberSaveable { mutableStateOf("") }
     var lastTranscriptionId by rememberSaveable { mutableStateOf(-1L) }
 
+    // Respect the system "remove animations" accessibility setting where practical.
+    val context = LocalContext.current
+    val animationsEnabled = remember(context) {
+        runCatching {
+            Settings.Global.getFloat(
+                context.contentResolver,
+                Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f
+            ) != 0f
+        }.getOrDefault(true)
+    }
+
     val isListening = state == AssistantState.LISTENING
     val isProcessing = state == AssistantState.PROCESSING || state == AssistantState.ANALYZING
     val canSend = text.isNotBlank() && !isProcessing
@@ -462,7 +476,7 @@ private fun InputBar(
                         .fillMaxWidth()
                         .height(28.dp)
                         .semantics { contentDescription = "جارٍ الاستماع" },
-                    isAnimating = true
+                    isAnimating = animationsEnabled
                 )
                 Spacer(modifier = Modifier.height(6.dp))
             }
@@ -512,6 +526,7 @@ private fun InputBar(
                     MicButton(
                         isRecording = isListening,
                         isBusy = false,
+                        animate = animationsEnabled,
                         onClick = onToggleMic
                     )
                 }
@@ -557,28 +572,30 @@ internal fun mergeTranscription(current: String, phrase: String): String {
     return current + separator + trimmed
 }
 
-/** Mic toggle; pulses red while a recording is in progress. */
+/** Mic toggle; pulses red while a recording is in progress (unless motion is reduced). */
 @Composable
 private fun MicButton(
     isRecording: Boolean,
     isBusy: Boolean,
+    animate: Boolean = true,
     onClick: () -> Unit
 ) {
     val transition = rememberInfiniteTransition(label = "mic")
-    val pulse by transition.animateFloat(
+    val animatedPulse by transition.animateFloat(
         initialValue = 1f,
-        targetValue = if (isRecording) 1.25f else 1f,
+        targetValue = if (isRecording && animate) 1.25f else 1f,
         animationSpec = infiniteRepeatable(
             animation = tween<Float>(durationMillis = 700, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "pulse"
     )
+    val scale = if (animate) animatedPulse else 1f
 
     Box(
         modifier = Modifier
             .size(44.dp)
-            .scale(pulse)
+            .scale(scale)
             .clip(CircleShape)
             .background(if (isRecording) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary)
             .clickable(enabled = !isBusy, onClick = onClick)

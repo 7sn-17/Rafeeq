@@ -90,9 +90,13 @@ class DeviceSettingsSkill(
             else -> return SkillResult.failure("حالة بلوتوث غير مدعومة")
         }
 
-        // Android 13+ no longer allows apps to toggle Bluetooth directly; enable()/disable()
-        // are deprecated no-ops. Open Settings instead and report that the change must finish there.
+        // Android 13+ forbids silent toggling: enable()/disable() are deprecated no-ops.
+        // Turning ON still has a sanctioned path — the system confirmation dialog — while
+        // turning OFF is only available in Settings, so each case is handled honestly.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (requestedOn) {
+                return requestBluetoothEnable()
+            }
             return openBluetoothSettings()
         }
 
@@ -120,6 +124,33 @@ class DeviceSettingsSkill(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to change bluetooth", e)
             SkillResult.failure("تعذّر تغيير إعداد البلوتوث")
+        }
+    }
+
+    /**
+     * Asks the system to enable Bluetooth through the official confirmation dialog. If it is
+     * already on this is reported as a no-op, otherwise the honest wording is used because the
+     * user still has to confirm in the system dialog.
+     */
+    private fun requestBluetoothEnable(): SkillResult {
+        if (bluetoothAdapter?.isEnabled == true) {
+            return SkillResult.success("البلوتوث مفعّل بالفعل.")
+        }
+        val intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        if (appContext.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) == null) {
+            return openBluetoothSettings()
+        }
+        return try {
+            appContext.startActivity(intent)
+            SkillResult.screenOpened("تم طلب تشغيل البلوتوث. أكّد من نافذة النظام.")
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG, "Bluetooth enable request not available", e)
+            openBluetoothSettings()
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Bluetooth enable request blocked", e)
+            openBluetoothSettings()
         }
     }
 

@@ -118,6 +118,20 @@ fun MainScreen(
     val scope = rememberCoroutineScope()
     var showAbout by remember { mutableStateOf(false) }
 
+    // The permission launcher lives here, at a component that is never removed, so a dialog
+    // result is not lost when the pending request is cleared as soon as the dialog opens.
+    val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { grantResults ->
+        onPermissionResult(grantResults)
+    }
+
+    LaunchedEffect(pendingPermission?.id) {
+        val pending = pendingPermission ?: return@LaunchedEffect
+        onPermissionShown(pending.id)
+        permissionLauncher.launch(pending.permissions.toTypedArray())
+    }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -178,12 +192,6 @@ fun MainScreen(
     if (showAbout) {
         AboutDialog(onDismiss = { showAbout = false })
     }
-
-    PermissionDialog(
-        pendingPermission = pendingPermission,
-        onShown = onPermissionShown,
-        onResult = onPermissionResult
-    )
 
     ConfirmationDialog(
         pendingConfirmation = pendingConfirmation,
@@ -678,26 +686,6 @@ private fun AboutDialog(onDismiss: () -> Unit) {
             TextButton(onClick = onDismiss) { Text("حسناً") }
         }
     )
-}
-
-@Composable
-private fun PermissionDialog(
-    pendingPermission: PendingPermissionRequest?,
-    onShown: (String) -> Unit,
-    onResult: (Map<String, Boolean>) -> Unit
-) {
-    if (pendingPermission == null) return
-
-    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
-        contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
-    ) { grantResults ->
-        onResult(grantResults)
-    }
-
-    androidx.compose.runtime.LaunchedEffect(pendingPermission.id) {
-        onShown(pendingPermission.id)
-        launcher.launch(pendingPermission.permissions.toTypedArray())
-    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

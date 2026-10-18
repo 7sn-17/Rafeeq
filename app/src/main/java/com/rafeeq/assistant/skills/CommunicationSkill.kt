@@ -5,11 +5,14 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.ContactsContract
+import android.telephony.PhoneNumberUtils
+import android.telephony.TelephonyManager
 import android.util.Log
 import com.rafeeq.assistant.permissions.PermissionsManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 /**
  * Real communication actions backed by Android intents.
@@ -37,7 +40,8 @@ class CommunicationSkill(
             return@withContext SkillResult.failure("لم أتعرف على اسم جهة الاتصال. اذكر الاسم من فضلك.")
         }
 
-        val phone = when (val lookup = lookupContact(name)) {
+        // A number the user dictated directly is used as-is instead of being searched for.
+        val phone = asPhoneNumber(name) ?: when (val lookup = lookupContact(name)) {
             is ContactLookup.Found -> lookup.phoneNumber
             is ContactLookup.NotFound ->
                 return@withContext SkillResult.failure("لم يتم العثور على جهة الاتصال.")
@@ -53,7 +57,10 @@ class CommunicationSkill(
                 )
         }
 
-        val intent = Intent(Intent.ACTION_DIAL).apply {
+        // Place the call for real when CALL_PHONE is granted; otherwise fall back to the
+        // dialer, which still pre-fills the number but leaves the final tap to the user.
+        val canCall = permissionsManager.hasCallPhonePermission()
+        val intent = Intent(if (canCall) Intent.ACTION_CALL else Intent.ACTION_DIAL).apply {
             data = Uri.fromParts("tel", phone, null)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
@@ -64,7 +71,11 @@ class CommunicationSkill(
 
         try {
             appContext.startActivity(intent)
-            SkillResult.screenOpened("تم فتح تطبيق الاتصال.")
+            if (canCall) {
+                SkillResult.screenOpened("تم بدء المكالمة.")
+            } else {
+                SkillResult.screenOpened("تم فتح لوحة الاتصال بالرقم. اضغط زر الاتصال لإتمام المكالمة.")
+            }
         } catch (e: ActivityNotFoundException) {
             Log.e(TAG, "No dialer available", e)
             SkillResult.failure("تعذّر فتح تطبيق الاتصال على هذا الجهاز.")
@@ -91,7 +102,9 @@ class CommunicationSkill(
                 return@withContext SkillResult.failure("لم أتعرف على اسم جهة الاتصال. اذكر الاسم من فضلك.")
             }
 
-            val phone = when (val lookup = lookupContact(name)) {
+            val directNumber = asPhoneNumber(name)
+            val lookup = if (directNumber == null) lookupContact(name) else null
+            val phone = directNumber ?: when (lookup) {
                 is ContactLookup.Found -> lookup.phoneNumber
                 is ContactLookup.NotFound ->
                     return@withContext SkillResult.failure("لم يتم العثور على جهة الاتصال.")
@@ -105,33 +118,106 @@ class CommunicationSkill(
                         "لا توجد صلاحية للوصول إلى جهات الاتصال. يرجى منح الإذن المطلوب.",
                         listOf(permissionsManager.getReadContactsPermission())
                     )
+                null -> return@withContext SkillResult.failure("لم أتعرف على جهة الاتصال.")
+            }
+            val displayName = (lookup as? ContactLookup.Found)?.displayName ?: name
+
+            val waNumber = toWhatsAppNumber(phone)
+            if (waNumber.isBlank()) {
+                return@withContext SkillResult.failure(
+                    "تعذّر تحديد رقم صالح لإرسال رسالة واتساب إلى \"$displayName\"."
+                )
             }
 
-            val uri = Uri.fromParts("smsto", phone, null)
-            val packageManager = appContext.packageManager
+            val encodedMessage = Uri.encode(message)
 
-            for (packageName in WHATSAPP_PACKAGES) {
-                val intent = Intent(Intent.ACTION_SENDTO, uri).apply {
-                    setPackage(packageName)
-                    putExtra("sms_body", message)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // WhatsApp documents the wa.me link as the reliable way to open a chat with the
+            // message pre-filled. Each candidate is package-targeted first so it opens WhatsApp
+            // itself rather than a browser, with the older smsto intent kept as a last resort.
+            val candidates = buildList {
+                for (packageName in WHATSAPP_PACKAGES) {
+                    add(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$waNumber?text=$encodedMessage"))
+                            .setPackage(packageName)
+                    )
+                    add(
+                        Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://api.whatsapp.com/send?phone=$waNumber&text=$encodedMessage")
+                        ).setPackage(packageName)
+                    )
+                    add(
+                        Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$waNumber")).apply {
+                            setPackage(packageName)
+                            putExtra("sms_body", message)
+                        }
+                    )
                 }
-                if (intent.resolveActivity(packageManager) == null) continue
+            }
 
+            for (intent in candidates) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (intent.resolveActivity(appContext.packageManager) == null) continue
                 try {
                     appContext.startActivity(intent)
+                    // Opening the pre-filled chat is verified; actual delivery is WhatsApp's job,
+                    // so it is deliberately not reported as done.
                     return@withContext SkillResult.screenOpened(
-                        "تم فتح واتساب، لكن لم يتم التحقق من إرسال الرسالة."
+                        "تم فتح واتساب مع نص الرسالة إلى $displayName. الإرسال النهائي يتطلب تأكيدك."
                     )
                 } catch (e: ActivityNotFoundException) {
-                    Log.w(TAG, "$packageName could not be launched", e)
+                    Log.w(TAG, "WhatsApp intent could not be launched", e)
                 } catch (e: SecurityException) {
-                    Log.w(TAG, "$packageName launch was blocked", e)
+                    Log.w(TAG, "WhatsApp launch was blocked", e)
                 }
             }
 
             SkillResult.failure("تعذّر فتح واتساب. تأكد من تثبيته على جهازك.")
         }
+
+    /** True when the user dictated an actual phone number, so contacts access is not needed. */
+    fun isDirectPhoneNumber(query: String): Boolean = asPhoneNumber(query) != null
+
+    /**
+     * Returns the query as a phone number when it is clearly one (the user dictated digits),
+     * or null when it should still be treated as a contact name to search for.
+     */
+    private fun asPhoneNumber(query: String): String? {
+        val trimmed = query.trim()
+        val digits = trimmed.count { it.isDigit() }
+        if (digits < 5) return null
+        val isNumberLike = trimmed.all { it.isDigit() || it in "+ -()" }
+        return if (isNumberLike) trimmed else null
+    }
+
+    /**
+     * Normalises a stored phone number into the digits-only international form WhatsApp expects.
+     *
+     * [PhoneNumberUtils.formatNumberToE164] first converts a local number using the device's
+     * country; when that fails the leading 00 (international prefix) is stripped instead.
+     */
+    private fun toWhatsAppNumber(rawNumber: String): String {
+        val cleaned = rawNumber.filter { it.isDigit() || it == '+' }
+        if (cleaned.isBlank()) return ""
+
+        val e164 = try {
+            currentCountryIso()?.let { PhoneNumberUtils.formatNumberToE164(cleaned, it) }
+        } catch (e: Exception) {
+            null
+        }
+
+        val digits = (e164 ?: cleaned).filter { it.isDigit() }
+        return if (digits.startsWith("00") && digits.length > 4) digits.substring(2) else digits
+    }
+
+    private fun currentCountryIso(): String? = try {
+        val telephony = appContext.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+        val iso = telephony?.networkCountryIso?.takeIf { it.isNotBlank() }
+            ?: telephony?.simCountryIso?.takeIf { it.isNotBlank() }
+        iso?.uppercase() ?: Locale.getDefault().country.takeIf { it.isNotBlank() }
+    } catch (e: Exception) {
+        null
+    }
 
     /* -------------------------------------------------------------------------------------
      * Contact lookup

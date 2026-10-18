@@ -297,35 +297,124 @@ class SystemControlSkill(context: Context) {
     }
 
     /**
-     * Opens an installed application by package name. Only launchable apps (MAIN/LAUNCHER)
-     * will have a result from [PackageManager.getLaunchIntentForPackage].
+     * Opens an installed application.
+     *
+     * [appIdentifier] may be an exact package name (`com.google.android.youtube`) or the name
+     * the user actually said (`يوتيوب`, `YouTube`, `واتساب`). Names are resolved against the
+     * installed launcher apps, with a small alias table for popular apps whose Arabic and
+     * English names differ from their label, so "افتح يوتيوب" really launches YouTube instead of
+     * failing on a guessed package name.
      */
-    suspend fun openApp(packageName: String): SkillResult = withContext(Dispatchers.Main) {
-        if (packageName.isBlank()) {
-            return@withContext SkillResult.failure("اسم التطبيق غير صالح.")
+    suspend fun openApp(appIdentifier: String): SkillResult = withContext(Dispatchers.Main) {
+        val query = appIdentifier.trim()
+        if (query.isEmpty()) {
+            return@withContext SkillResult.failure("لم أتعرف على اسم التطبيق. اذكر اسم التطبيق من فضلك.")
         }
 
-        val canonical = packageName.trim()
-        if (!isValidPackageName(canonical)) {
-            return@withContext SkillResult.failure("اسم التطبيق غير صالح.")
-        }
+        val resolved = try {
+            resolveApp(query)
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not resolve app '$query'", e)
+            null
+        } ?: return@withContext SkillResult.failure(
+            "لم يتم العثور على تطبيق باسم \"$query\" على هذا الجهاز."
+        )
 
         val launchIntent = try {
-            packageManager.getLaunchIntentForPackage(canonical)
+            packageManager.getLaunchIntentForPackage(resolved.packageName)
         } catch (e: Exception) {
-            Log.w(TAG, "Could not resolve launch intent for $canonical", e)
-            return@withContext SkillResult.failure("التطبيق المطلوب غير مثبت أو لا يمكن فتحه.")
-        } ?: return@withContext SkillResult.failure("التطبيق المطلوب غير مثبت أو لا يمكن فتحه.")
+            Log.w(TAG, "Could not resolve launch intent for ${resolved.packageName}", e)
+            null
+        } ?: return@withContext SkillResult.failure(
+            "التطبيق \"${resolved.label}\" غير قابل للفتح."
+        )
+
+        // Skills run from the application context, so the launched activity needs its own task.
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
         try {
             appContext.startActivity(launchIntent)
-            SkillResult.screenOpened("تم فتح التطبيق.")
+            SkillResult.screenOpened("تم فتح ${resolved.label}.")
         } catch (e: ActivityNotFoundException) {
-            Log.e(TAG, "No handler for $canonical", e)
-            SkillResult.failure("تعذّر فتح التطبيق المطلوب.")
+            Log.e(TAG, "No handler for ${resolved.packageName}", e)
+            SkillResult.failure("تعذّر فتح التطبيق \"${resolved.label}\".")
         } catch (e: SecurityException) {
-            Log.e(TAG, "Launch of $canonical blocked", e)
-            SkillResult.failure("تعذّر فتح التطبيق المطلوب بسبب قيود النظام.")
+            Log.e(TAG, "Launch of ${resolved.packageName} blocked", e)
+            SkillResult.failure("تعذّر فتح التطبيق \"${resolved.label}\" بسبب قيود النظام.")
+        }
+    }
+
+    /** A launchable app found on the device. */
+    private data class ResolvedApp(val packageName: String, val label: String)
+
+    /**
+     * Resolves a spoken/typed app name to an installed package.
+     *
+     * Order matters: an explicit package name wins, then a known alias that is actually
+     * installed, then an exact label match, then a prefix/contains match on the label, and
+     * finally a match on the package name itself.
+     */
+    private fun resolveApp(query: String): ResolvedApp? {
+        if (isValidPackageName(query)) {
+            return ResolvedApp(query, applicationLabel(query) ?: query)
+        }
+
+        val normalized = normalizeAppName(query)
+
+        APP_ALIASES[normalized]
+            ?.takeIf { isInstalled(it) }
+            ?.let { return ResolvedApp(it, applicationLabel(it) ?: query) }
+
+        val launchable = launchableApps()
+
+        launchable.firstOrNull { normalizeAppName(it.label) == normalized }?.let { return it }
+        launchable.firstOrNull { normalizeAppName(it.label).startsWith(normalized) }?.let { return it }
+        launchable.firstOrNull { normalizeAppName(it.label).contains(normalized) }?.let { return it }
+        launchable.firstOrNull { normalizeAppName(it.packageName).contains(normalized) }?.let { return it }
+
+        return null
+    }
+
+    /** Every app that exposes a launcher entry, de-duplicated by package. */
+    private fun launchableApps(): List<ResolvedApp> {
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        return packageManager.queryIntentActivities(intent, 0)
+            .mapNotNull { info ->
+                val packageName = info.activityInfo?.packageName ?: return@mapNotNull null
+                ResolvedApp(packageName, info.loadLabel(packageManager).toString())
+            }
+            .distinctBy { it.packageName }
+    }
+
+    private fun isInstalled(packageName: String): Boolean = try {
+        packageManager.getApplicationInfo(packageName, 0)
+        true
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun applicationLabel(packageName: String): String? = try {
+        packageManager.getApplicationLabel(packageManager.getApplicationInfo(packageName, 0)).toString()
+    } catch (e: Exception) {
+        null
+    }
+
+    /**
+     * Normalises a name for comparison: lower-case, no diacritics or tatweel, unified alef
+     * forms, no spaces or punctuation. This lets "إنستغرام" match "انستغرام" and "YouTube"
+     * match "youtube".
+     */
+    private fun normalizeAppName(value: String): String = buildString {
+        for (ch in value.lowercase()) {
+            when (ch) {
+                'أ', 'إ', 'آ', 'ٱ' -> append('ا')
+                'ى' -> append('ي')
+                'ة' -> append('ه')
+                'ـ' -> Unit // tatweel
+                in '\u064B'..'\u0652' -> Unit // Arabic diacritics
+                ' ', '-', '_', '.', '\'', '’', '(', ')', '!', '،', ',' -> Unit
+                else -> append(ch)
+            }
         }
     }
 
@@ -379,5 +468,65 @@ class SystemControlSkill(context: Context) {
         const val TAG = "SystemControlSkill"
         const val WRITE_SETTINGS_PERMISSION = "android.permission.WRITE_SETTINGS"
         val PACKAGE_PATTERN = Regex("^[A-Za-z][A-Za-z0-9_.]*$")
+
+        /**
+         * Popular apps whose package name cannot be guessed from what the user says. Keys are
+         * already normalised the same way as [normalizeAppName]; an alias only wins when the
+         * app is actually installed, so a stale entry can never produce a wrong launch.
+         */
+        val APP_ALIASES: Map<String, String> = mapOf(
+            "يوتيوب" to "com.google.android.youtube",
+            "youtube" to "com.google.android.youtube",
+            "يوتيوبميوزك" to "com.google.android.apps.youtube.music",
+            "youtubemusic" to "com.google.android.apps.youtube.music",
+            "واتساب" to "com.whatsapp",
+            "whatsapp" to "com.whatsapp",
+            "واتساباعمال" to "com.whatsapp.w4b",
+            "فيسبوك" to "com.facebook.katana",
+            "facebook" to "com.facebook.katana",
+            "انستغرام" to "com.instagram.android",
+            "instagram" to "com.instagram.android",
+            "تويتر" to "com.twitter.android",
+            "twitter" to "com.twitter.android",
+            "تليجرام" to "org.telegram.messenger",
+            "telegram" to "org.telegram.messenger",
+            "تيكتوك" to "com.zhiliaoapp.musically",
+            "tiktok" to "com.zhiliaoapp.musically",
+            "سنابشات" to "com.snapchat.android",
+            "snapchat" to "com.snapchat.android",
+            "جيميل" to "com.google.android.gm",
+            "gmail" to "com.google.android.gm",
+            "خرائط" to "com.google.android.apps.maps",
+            "خرائطجوجل" to "com.google.android.apps.maps",
+            "maps" to "com.google.android.apps.maps",
+            "كروم" to "com.android.chrome",
+            "chrome" to "com.android.chrome",
+            "سبوتيفاي" to "com.spotify.music",
+            "spotify" to "com.spotify.music",
+            "نتفليكس" to "com.netflix.mediaclient",
+            "netflix" to "com.netflix.mediaclient",
+            "زووم" to "us.zoom.videomeetings",
+            "zoom" to "us.zoom.videomeetings",
+            "ديسكورد" to "com.discord",
+            "discord" to "com.discord",
+            "ريديت" to "com.reddit.frontpage",
+            "reddit" to "com.reddit.frontpage",
+            "جوجل" to "com.google.android.googlequicksearchbox",
+            "google" to "com.google.android.googlequicksearchbox",
+            "المعرض" to "com.google.android.apps.photos",
+            "الصور" to "com.google.android.apps.photos",
+            "photos" to "com.google.android.apps.photos",
+            "playstore" to "com.android.vending",
+            "متجرجوجل" to "com.android.vending",
+            "متجرplay" to "com.android.vending",
+            "الاعدادات" to "com.android.settings",
+            "اعدادات" to "com.android.settings",
+            "settings" to "com.android.settings",
+            "الرسائل" to "com.google.android.apps.messaging",
+            "messages" to "com.google.android.apps.messaging",
+            "الهاتف" to "com.google.android.dialer",
+            "phone" to "com.google.android.dialer",
+            "المتجر" to "com.android.vending"
+        )
     }
 }

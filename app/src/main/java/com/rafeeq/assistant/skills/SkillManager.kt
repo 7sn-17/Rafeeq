@@ -137,15 +137,29 @@ class SkillManager(
             "organizeImages" -> organizeImages(args)
 
             "callContact" -> {
-                // The contact lookup reads the address book, so READ_CONTACTS comes first.
-                requireContactsPermission()?.let { return it }
-                communicationSkill.callContact(args["name"] ?: args["contact"] ?: "")
+                val target = args["name"] ?: args["contact"] ?: ""
+                // A dictated number needs no contacts access; a name does.
+                if (!communicationSkill.isDirectPhoneNumber(target)) {
+                    requireContactsPermission()?.let { return it }
+                }
+                // Ask for CALL_PHONE so the call is actually placed. If the user declines,
+                // callContact falls back to opening the dialer instead of failing.
+                if (!permissionsManager.hasCallPhonePermission()) {
+                    requestPermissions(
+                        listOf(permissionsManager.getCallPhonePermission()),
+                        "أحتاج إذن الاتصال لتنفيذ المكالمة فعلياً."
+                    )
+                }
+                communicationSkill.callContact(target)
             }
 
             "sendWhatsAppMessage" -> {
-                requireContactsPermission()?.let { return it }
+                val target = args["contact"] ?: args["name"] ?: ""
+                if (!communicationSkill.isDirectPhoneNumber(target)) {
+                    requireContactsPermission()?.let { return it }
+                }
                 communicationSkill.sendWhatsAppMessage(
-                    name = args["contact"] ?: args["name"] ?: "",
+                    name = target,
                     message = args["message"] ?: ""
                 )
             }
@@ -171,7 +185,13 @@ class SkillManager(
                 state = args["state"] ?: ""
             )
 
-            "openApp" -> systemControlSkill.openApp(args["package"] ?: args["packageName"] ?: "")
+            "openApp" -> systemControlSkill.openApp(
+                args["app"]
+                    ?: args["package"]
+                    ?: args["packageName"]
+                    ?: args["name"]
+                    ?: ""
+            )
             "takeScreenshot" -> systemControlSkill.takeScreenshot()
 
             else -> SkillResult.failure("لم أفهم طلبك.")

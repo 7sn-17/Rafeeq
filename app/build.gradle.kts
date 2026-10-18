@@ -13,7 +13,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 5
-        versionName = "0.4"
+        versionName = "0.5"
 
         // Injected from CI (GitHub Actions secret -> environment variable). Reading the key
         // from the environment rather than local.properties means a CI runner never needs a

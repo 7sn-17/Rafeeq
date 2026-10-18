@@ -125,6 +125,12 @@ class AssistantEngine(private val context: Context) {
     private var inFlightText: String? = null
 
     /**
+     * True while a device/skill action is actually executing. Cancelling cannot undo a device
+     * action that already completed, so the cancellation message is only shown when this is set.
+     */
+    private var deviceActionInFlight = false
+
+    /**
      * A short-lived, human readable progress line ("جاري تحليل الطلب...", ...). It is cleared
      * as soon as the final answer arrives, so it never lingers in the conversation history.
      */
@@ -204,6 +210,7 @@ class AssistantEngine(private val context: Context) {
         processingJob?.cancel()
         val sequence = ++requestSequence
         inFlightText = text
+        deviceActionInFlight = false
         _restoreInput.value = null
         processingJob = scope.launch {
             handleUserSpeech(text, sequence)
@@ -226,6 +233,17 @@ class AssistantEngine(private val context: Context) {
         _statusText.value = null
         _state.value = AssistantState.IDLE
         _restoreInput.value = inFlightText
+
+        // Cancellation stops the request; it cannot reverse a device action that already ran.
+        if (deviceActionInFlight) {
+            deviceActionInFlight = false
+            addMessage(
+                ChatMessage(
+                    "تم إلغاء الطلب. ملاحظة: إذا كان أحد إجراءات الجهاز قد نُفِّذ بالفعل فلا يمكن التراجع عنه تلقائياً.",
+                    isUser = false
+                )
+            )
+        }
     }
 
     /** Called by the UI once the restored text has been placed back in the input field. */
@@ -246,6 +264,7 @@ class AssistantEngine(private val context: Context) {
         processingJob = null
         requestSequence++
         inFlightText = null
+        deviceActionInFlight = false
         _restoreInput.value = null
         _transcription.value = null
         ttsManager.stop()
@@ -339,6 +358,7 @@ class AssistantEngine(private val context: Context) {
                     )
                 )
                 try {
+                    deviceActionInFlight = true
                     val result = skillManager.handleFunction(request.name, request.args)
                     publishResult(result, sequence)
                 } catch (e: CancellationException) {
@@ -365,6 +385,9 @@ class AssistantEngine(private val context: Context) {
         "openSystemSetting" -> "جاري فتح إعدادات النظام..."
         "changeSystemSetting" -> "جاري تغيير إعداد النظام..."
         "openApp" -> "جاري فتح التطبيق..."
+        "setVolume" -> "جاري ضبط مستوى الصوت..."
+        "toggleFlashlight" -> "جاري التحكم في الكشاف..."
+        "webSearch" -> "جاري البحث..."
         "takeScreenshot" -> "جاري الاستعداد لالتقاط لقطة شاشة..."
         else -> "جاري تنفيذ الأمر..."
     }
@@ -394,6 +417,7 @@ class AssistantEngine(private val context: Context) {
     private fun publishResult(result: SkillResult, sequence: Long) {
         // A superseded or cancelled request must never overwrite newer chat state.
         if (!isCurrent(sequence)) return
+        deviceActionInFlight = false
         _statusText.value = null
         _responseText.value = result.message
         _state.value = AssistantState.COMPLETED

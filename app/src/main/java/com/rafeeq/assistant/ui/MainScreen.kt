@@ -75,7 +75,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -422,7 +424,11 @@ private fun InputBar(
     onTranscriptionConsumed: (Long) -> Unit,
     onRestoreInputConsumed: () -> Unit
 ) {
-    var text by rememberSaveable { mutableStateOf("") }
+    // TextFieldValue (rather than a plain String) keeps the caret position correct after a
+    // transcription is appended, so the user can keep typing at the end of the merged text.
+    var text by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(""))
+    }
     var lastTranscriptionId by rememberSaveable { mutableStateOf(-1L) }
 
     // Respect the system "remove animations" accessibility setting where practical.
@@ -439,21 +445,22 @@ private fun InputBar(
 
     val isListening = state == AssistantState.LISTENING
     val isProcessing = state == AssistantState.PROCESSING || state == AssistantState.ANALYZING
-    val canSend = text.isNotBlank() && !isProcessing
+    val canSend = text.text.isNotBlank() && !isProcessing
 
     // Merge a finalized recognition result into the current value, never a stale capture.
     LaunchedEffect(transcription?.id) {
         val event = transcription ?: return@LaunchedEffect
         if (event.id == lastTranscriptionId) return@LaunchedEffect
         lastTranscriptionId = event.id
-        text = mergeTranscription(text, event.text)
+        val merged = mergeTranscription(text.text, event.text)
+        text = TextFieldValue(merged, selection = TextRange(merged.length))
         onTranscriptionConsumed(event.id)
     }
 
     // Give the user their text back when a request is cancelled.
     LaunchedEffect(restoreInput) {
         val restored = restoreInput ?: return@LaunchedEffect
-        text = restored
+        text = TextFieldValue(restored, selection = TextRange(restored.length))
         onRestoreInputConsumed()
     }
 
@@ -537,8 +544,8 @@ private fun InputBar(
                     enabled = canSend,
                     onClick = {
                         if (canSend) {
-                            onSendText(text)
-                            text = ""
+                            onSendText(text.text)
+                            text = TextFieldValue("")
                         }
                     },
                     modifier = Modifier.semantics { contentDescription = "إرسال" }

@@ -1,10 +1,14 @@
 package com.rafeeq.assistant.skills
 
 import android.app.NotificationManager
+import android.app.SearchManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraAccessException
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -52,6 +56,7 @@ class SystemControlSkill(context: Context) {
                 "dnd", "do_not_disturb", "silent" -> toggleDND(desired)
                 "rotation", "auto_rotate" -> toggleRotation(desired)
                 "dark_mode" -> setSystemDarkMode(desired)
+                "flashlight", "torch" -> toggleFlashlight(desired)
                 else -> SkillResult.failure("إعداد النظام المطلوب غير مدعوم")
             }
         }
@@ -259,6 +264,73 @@ class SystemControlSkill(context: Context) {
     }
 
     /* -------------------------------------------------------------------------------------
+     * Flashlight (torch)
+     *
+     * setTorchMode needs no runtime permission and is supported since API 23. The torch is
+     * busy while the camera app uses it, in which case CameraAccessException is surfaced as an
+     * honest failure instead of a false success.
+     * ----------------------------------------------------------------------------------- */
+
+    private fun toggleFlashlight(enable: Boolean): SkillResult {
+        val cameraManager = appContext.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
+            ?: return SkillResult.failure("خدمة الكاميرا غير متوفرة على هذا الجهاز.")
+
+        val cameraId = try {
+            cameraManager.cameraIdList.firstOrNull { id ->
+                cameraManager.getCameraCharacteristics(id)
+                    .get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            }
+        } catch (e: CameraAccessException) {
+            Log.w(TAG, "Could not list cameras", e)
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not inspect camera flash", e)
+            null
+        } ?: return SkillResult.failure("لا يوجد كشاف (فلاش) متاح على هذا الجهاز.")
+
+        return try {
+            cameraManager.setTorchMode(cameraId, enable)
+            SkillResult.success(if (enable) "تم تشغيل الكشاف." else "تم إيقاف الكشاف.")
+        } catch (e: CameraAccessException) {
+            Log.w(TAG, "Torch toggle was rejected", e)
+            SkillResult.failure("تعذّر التحكم في الكشاف. قد يكون مستخدَماً من تطبيق آخر.")
+        } catch (e: Exception) {
+            Log.w(TAG, "Torch toggle failed", e)
+            SkillResult.failure("تعذّر التحكم في الكشاف.")
+        }
+    }
+
+    /* -------------------------------------------------------------------------------------
+     * Web search
+     * ----------------------------------------------------------------------------------- */
+
+    /**
+     * Opens the device's search UI pre-filled with [query]. Nothing is scraped or sent to the AI
+     * backend; the OS search app (or the default browser as a fallback) performs the search.
+     */
+    suspend fun webSearch(query: String): SkillResult = withContext(Dispatchers.Main) {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) {
+            return@withContext SkillResult.failure("لم أتعرف على ما تريد البحث عنه.")
+        }
+
+        val searchIntent = Intent(Intent.ACTION_WEB_SEARCH).apply {
+            putExtra(SearchManager.QUERY, trimmed)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        if (packageManager.resolveActivity(searchIntent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
+            return@withContext tryLaunch(searchIntent, "تم فتح البحث عن \"$trimmed\".")
+        }
+
+        // Some devices expose no ACTION_WEB_SEARCH handler; the browser is an honest fallback.
+        val browserIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("https://www.google.com/search?q=" + Uri.encode(trimmed))
+        ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        tryLaunch(browserIntent, "تم فتح البحث عن \"$trimmed\" في المتصفح.")
+    }
+
+    /* -------------------------------------------------------------------------------------
      * Existing Phase 1 actions (Wi-Fi, Bluetooth, apps, screenshot)
      * ----------------------------------------------------------------------------------- */
 
@@ -316,7 +388,8 @@ class SystemControlSkill(context: Context) {
         } catch (e: Exception) {
             Log.w(TAG, "Could not resolve app '$query'", e)
             null
-        } ?: return@withContext SkillResult.failure(
+        } ?: return@withContext openStoreSearch(
+            query,
             "لم يتم العثور على تطبيق باسم \"$query\" على هذا الجهاز."
         )
 
@@ -342,6 +415,30 @@ class SystemControlSkill(context: Context) {
             Log.e(TAG, "Launch of ${resolved.packageName} blocked", e)
             SkillResult.failure("تعذّر فتح التطبيق \"${resolved.label}\" بسبب قيود النظام.")
         }
+    }
+
+    /**
+     * When the app the user asked for is not installed, opens the app store on that app's page
+     * (for a known alias) or on a name search. Returns the honest not-found message when no
+     * store is available, so a missing app never looks like a successful launch.
+     */
+    private fun openStoreSearch(query: String, notFoundMessage: String): SkillResult {
+        val knownPackage = APP_ALIASES[normalizeAppName(query)]
+        val marketUri = if (knownPackage != null && !isInstalled(knownPackage)) {
+            Uri.parse("market://details?id=$knownPackage")
+        } else {
+            Uri.parse("market://search?q=" + Uri.encode(query))
+        }
+        val marketIntent = Intent(Intent.ACTION_VIEW, marketUri).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        if (packageManager.resolveActivity(marketIntent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
+            return tryLaunch(
+                marketIntent,
+                "التطبيق غير مثبت على جهازك. تم فتح متجر التطبيقات لتثبيته."
+            )
+        }
+        return SkillResult.failure(notFoundMessage)
     }
 
     /** A launchable app found on the device. */
@@ -526,7 +623,24 @@ class SystemControlSkill(context: Context) {
             "messages" to "com.google.android.apps.messaging",
             "الهاتف" to "com.google.android.dialer",
             "phone" to "com.google.android.dialer",
-            "المتجر" to "com.android.vending"
+            "المتجر" to "com.android.vending",
+            "تلجرام" to "org.telegram.messenger",
+            "تلغرام" to "org.telegram.messenger",
+            "اكس" to "com.twitter.android",
+            "x" to "com.twitter.android",
+            "سناب" to "com.snapchat.android",
+            "لينكدان" to "com.linkedin.android",
+            "linkedin" to "com.linkedin.android",
+            "الحاسبة" to "com.google.android.calculator",
+            "الةالحاسبة" to "com.google.android.calculator",
+            "calculator" to "com.google.android.calculator",
+            "الساعة" to "com.google.android.deskclock",
+            "المنبه" to "com.google.android.deskclock",
+            "clock" to "com.google.android.deskclock",
+            "التقويم" to "com.google.android.calendar",
+            "calendar" to "com.google.android.calendar",
+            "الملاحظات" to "com.google.android.keep",
+            "keep" to "com.google.android.keep"
         )
     }
 }

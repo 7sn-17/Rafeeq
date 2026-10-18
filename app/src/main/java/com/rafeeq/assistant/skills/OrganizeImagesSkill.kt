@@ -93,6 +93,7 @@ class OrganizeImagesSkill(context: Context) {
         }
 
         var movedCount = 0
+        var processedCount = 0
         for (image in images) {
             try {
                 if (moveImage(image, targetFolderFor(image, sortBy))) {
@@ -104,6 +105,18 @@ class OrganizeImagesSkill(context: Context) {
             } catch (e: Exception) {
                 // A single unreadable or locked file must not abort the rest of the batch.
                 Log.e(TAG, "Failed to move image '${image.displayName}'", e)
+            }
+            processedCount++
+            // Publish coarse progress so a background notification can follow along; the
+            // notification manager throttles these further before showing anything.
+            if (processedCount % PROGRESS_EVERY == 0) {
+                progressCallback?.invoke(
+                    ProcessingState.MOVING_FILES,
+                    mapOf(
+                        "count" to images.size.toString(),
+                        "moved" to movedCount.toString()
+                    )
+                )
             }
         }
 
@@ -377,6 +390,9 @@ class OrganizeImagesSkill(context: Context) {
         const val MILLIS_PER_SECOND = 1000L
         const val SORT_BY_DATE = "date"
         const val SORT_BY_SIZE = "size"
+
+        /** Emit a progress callback once every this many processed images. */
+        const val PROGRESS_EVERY = 5
         const val SIZE_FOLDER_SMALL = "Small"
         const val SIZE_FOLDER_MEDIUM = "Medium"
         const val SIZE_FOLDER_LARGE = "Large"

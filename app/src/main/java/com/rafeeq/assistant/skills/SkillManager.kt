@@ -178,6 +178,22 @@ class SkillManager(
                 deviceSettingsSkill.changeSetting(setting, args["state"] ?: "")
             }
 
+            "setVolume" -> {
+                val level = args["level"]?.trim()?.toIntOrNull()
+                if (level == null) {
+                    SkillResult.failure("لم أتعرف على مستوى الصوت المطلوب. حدّد نسبة من 0 إلى 100.")
+                } else {
+                    deviceSettingsSkill.setVolumePercent(level)
+                }
+            }
+
+            "webSearch" -> systemControlSkill.webSearch(args["query"] ?: args["q"] ?: "")
+
+            "toggleFlashlight" -> systemControlSkill.changeSystemSetting(
+                action = "flashlight",
+                state = args["state"] ?: "on"
+            )
+
             "openSystemSetting" -> systemControlSkill.openSystemSetting(args["setting"] ?: "")
 
             "changeSystemSetting" -> systemControlSkill.changeSystemSetting(
@@ -365,6 +381,23 @@ class SkillManager(
         }
 
         organizeImagesSkill.progressCallback = { state, extra ->
+            when (state) {
+                ProcessingState.SEARCHING_FILES ->
+                    notificationManager?.notifyTaskStart(TASK_ID_ORGANIZE_IMAGES, "تنظيم الصور")
+                ProcessingState.MOVING_FILES -> {
+                    val total = extra["count"]?.toIntOrNull() ?: 0
+                    val done = extra["moved"]?.toIntOrNull() ?: 0
+                    // Progress is throttled inside the notification manager, so a large batch
+                    // never floods the notification shade.
+                    notificationManager?.notifyTaskProgress(
+                        taskId = TASK_ID_ORGANIZE_IMAGES,
+                        taskName = "تنظيم الصور",
+                        done = done,
+                        total = total
+                    )
+                }
+                ProcessingState.COMPLETED -> Unit
+            }
             Log.d(TAG, "progress: $state $extra")
         }
 
@@ -399,6 +432,10 @@ class SkillManager(
                     failed = (summary.found - summary.moved).coerceAtLeast(0)
                 )
             )
+        } else {
+            // Nothing was organised after all: clear the ongoing progress notification instead of
+            // leaving a permanent "in progress" entry in the shade.
+            notificationManager?.cancelTask(TASK_ID_ORGANIZE_IMAGES)
         }
 
         // A successful query is not the same as successful organization, so the counts are

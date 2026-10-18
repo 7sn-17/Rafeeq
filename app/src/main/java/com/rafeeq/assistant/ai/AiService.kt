@@ -251,7 +251,9 @@ class AiService {
                 "لفتح تطبيق استخدم أداة openApp ومرِّر اسم التطبيق كما نطقه المستخدم مثل: يوتيوب أو واتساب. " +
                 "لإرسال رسالة واتساب استخدم أداة sendWhatsAppMessage مع اسم جهة الاتصال ونص الرسالة. " +
                 "للاتصال استخدم أداة callContact مع الاسم أو الرقم. " +
-                "لتغيير إعداد مثل الصوت أو البلوتوث أو واي فاي أو وضع الطيران أو الوضع الداكن استخدم أدوات الإعدادات المناسبة. " +
+                "لتغيير إعداد مثل الصوت أو البلوتوث أو واي فاي أو وضع الطيران أو الوضع الداكن أو الكشاف استخدم أدوات الإعدادات المناسبة، " +
+                "ولضبط نسبة صوت محددة استخدم أداة setVolume. " +
+                "للبحث على الإنترنت استخدم أداة webSearch. " +
                 "إذا لم يتطلب الأمر أي أداة، أجِب مباشرة بالعربية وبإيجاز. " +
                 "لا تدّعي نجاحاً لم يحدث: صِف بدقة ما نفّذته الأدوات وما تطلّب تدخّل المستخدم. " +
                 "لديك ذاكرة محادثة من الرسائل السابقة؛ استخدمها لفهم الإشارة والتتابع، " +
@@ -351,7 +353,7 @@ class AiService {
             ToolDefinition(
                 function = FunctionDefinition(
                     name = "changeSystemSetting",
-                    description = "التحكم في إعدادات النظام: وضع الطيران، نقطة الاتصال، NFC، عدم الإزعاج، تدوير الشاشة، الوضع الداكن",
+                    description = "التحكم في إعدادات النظام: وضع الطيران، نقطة الاتصال، NFC، عدم الإزعاج، تدوير الشاشة، الوضع الداكن، الكشاف",
                     parameters = mapOf(
                         "type" to "object",
                         "properties" to mapOf(
@@ -363,7 +365,8 @@ class AiService {
                                     "nfc",
                                     "dnd",
                                     "rotation",
-                                    "dark_mode"
+                                    "dark_mode",
+                                    "flashlight"
                                 ),
                                 "description" to "اسم الإعداد المطلوب تغييره"
                             ),
@@ -424,6 +427,63 @@ class AiService {
                         "type" to "object",
                         "properties" to emptyMap<String, Any>(),
                         "required" to emptyList<String>()
+                    )
+                )
+            ),
+
+            // setVolume(level) - precise volume percentage.
+            ToolDefinition(
+                function = FunctionDefinition(
+                    name = "setVolume",
+                    description = "ضبط مستوى صوت الوسائط بنسبة محددة من 0 إلى 100. استخدمها عندما يطلب المستخدم مستوى معيّناً مثل 50 بالمئة.",
+                    parameters = mapOf(
+                        "type" to "object",
+                        "properties" to mapOf(
+                            "level" to mapOf(
+                                "type" to "integer",
+                                "minimum" to 0,
+                                "maximum" to 100,
+                                "description" to "نسبة مستوى الصوت من 0 إلى 100"
+                            )
+                        ),
+                        "required" to listOf("level")
+                    )
+                )
+            ),
+
+            // toggleFlashlight(state) - the camera torch.
+            ToolDefinition(
+                function = FunctionDefinition(
+                    name = "toggleFlashlight",
+                    description = "تشغيل أو إيقاف الكشاف (فلاش الكاميرا)",
+                    parameters = mapOf(
+                        "type" to "object",
+                        "properties" to mapOf(
+                            "state" to mapOf(
+                                "type" to "string",
+                                "enum" to listOf("on", "off"),
+                                "description" to "on للتشغيل أو off للإيقاف"
+                            )
+                        ),
+                        "required" to listOf("state")
+                    )
+                )
+            ),
+
+            // webSearch(query) - opens the device's search UI.
+            ToolDefinition(
+                function = FunctionDefinition(
+                    name = "webSearch",
+                    description = "البحث على الإنترنت عن معلومة أو موضوع عبر تطبيق البحث في الجهاز",
+                    parameters = mapOf(
+                        "type" to "object",
+                        "properties" to mapOf(
+                            "query" to mapOf(
+                                "type" to "string",
+                                "description" to "نص البحث المطلوب"
+                            )
+                        ),
+                        "required" to listOf("query")
                     )
                 )
             )

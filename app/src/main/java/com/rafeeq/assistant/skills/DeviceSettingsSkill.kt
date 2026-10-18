@@ -24,9 +24,13 @@ class DeviceSettingsSkill(
     private val permissionsManager: PermissionsManager
 ) {
     private val appContext = context.applicationContext
-    private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    private val bluetoothManager = appContext.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-    private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
+    private val audioManager: AudioManager? =
+        appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+
+    // Some devices (and some emulators) expose no Bluetooth service at all; reading it with a
+    // safe cast avoids a construction-time crash that would take the whole assistant down.
+    private val bluetoothAdapter: BluetoothAdapter? =
+        (appContext.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
 
     suspend fun changeSetting(setting: String, state: String): SkillResult = withContext(Dispatchers.Main) {
         when (setting.lowercase()) {
@@ -37,29 +41,31 @@ class DeviceSettingsSkill(
     }
 
     private fun changeVolume(state: String): SkillResult {
+        val manager = audioManager
+            ?: return SkillResult.failure("خدمة الصوت غير متوفرة على هذا الجهاز.")
         val stream = AudioManager.STREAM_MUSIC
-        val current = audioManager.getStreamVolume(stream)
-        val max = audioManager.getStreamMaxVolume(stream)
+        val current = manager.getStreamVolume(stream)
+        val max = manager.getStreamMaxVolume(stream)
         if (max <= 0) {
             return SkillResult.failure("لا يمكن ضبط مستوى الصوت على هذا الجهاز.")
         }
 
         return try {
             when (state) {
-                "up" -> audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_RAISE, 0)
-                "down" -> audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_LOWER, 0)
-                "mute" -> audioManager.setStreamVolume(stream, 0, 0)
+                "up" -> manager.adjustStreamVolume(stream, AudioManager.ADJUST_RAISE, 0)
+                "down" -> manager.adjustStreamVolume(stream, AudioManager.ADJUST_LOWER, 0)
+                "mute" -> manager.setStreamVolume(stream, 0, 0)
                 "unmute" -> {
                     val restored = when {
                         current > 0 -> current
                         else -> (max / 3).coerceAtLeast(1)
                     }.coerceIn(1, max)
-                    audioManager.setStreamVolume(stream, restored, 0)
+                    manager.setStreamVolume(stream, restored, 0)
                 }
                 else -> return SkillResult.failure("حالة صوت غير مدعومة")
             }
 
-            val after = audioManager.getStreamVolume(stream)
+            val after = manager.getStreamVolume(stream)
             when {
                 after == 0 && state == "mute" -> SkillResult.success("تم كتم مستوى صوت الوسائط.")
                 after == 0 && state != "mute" -> SkillResult.success("تم ضبط مستوى صوت الوسائط على $after من $max.")
@@ -77,6 +83,36 @@ class DeviceSettingsSkill(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to change volume", e)
             SkillResult.failure("عذراً، تعذّر تغيير مستوى الصوت")
+        }
+    }
+
+    /**
+     * Sets the media volume to [level] percent (0-100). The result is read back and reported as
+     * the actual percentage, so a value clamped by the platform is not misreported.
+     */
+    fun setVolumePercent(level: Int): SkillResult {
+        val manager = audioManager
+            ?: return SkillResult.failure("خدمة الصوت غير متوفرة على هذا الجهاز.")
+        val stream = AudioManager.STREAM_MUSIC
+        val max = manager.getStreamMaxVolume(stream)
+        if (max <= 0) {
+            return SkillResult.failure("لا يمكن ضبط مستوى الصوت على هذا الجهاز.")
+        }
+
+        val clamped = level.coerceIn(0, 100)
+        val target = (max * clamped / 100.0).toInt().coerceIn(0, max)
+
+        return try {
+            manager.setStreamVolume(stream, target, 0)
+            val actual = manager.getStreamVolume(stream)
+            val percent = actual * 100 / max
+            SkillResult.success("تم ضبط مستوى الصوت على $percent%.")
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Setting the volume was denied", e)
+            SkillResult.userActionRequired("تعذّر ضبط مستوى الصوت تلقائياً. يمكنك تغييره من إعدادات الصوت.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to set the volume", e)
+            SkillResult.failure("عذراً، تعذّر ضبط مستوى الصوت")
         }
     }
 

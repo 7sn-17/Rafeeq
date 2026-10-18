@@ -12,12 +12,12 @@ android {
         applicationId = "com.rafeeq.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "0.5"
+        versionCode = 6
+        versionName = "0.6"
 
         // Injected from CI (GitHub Actions secret -> environment variable). Reading the key
         // from the environment rather than local.properties means a CI runner never needs a
-        // file that is absent from the checkout, so assembleDebug can actually sign & build.
+        // file that is absent from the checkout, so the release build can actually be signed.
         buildConfigField(
             "String",
             "GROQ_API_KEY",
@@ -34,6 +34,14 @@ android {
             // A PKCS12 keystore stores the private key under the same password as the
             // keystore itself, so this must match storePassword above.
             keyPassword = System.getenv("KEY_PASSWORD") ?: "hasan3522"
+
+            // Sign with both the JAR (v1) and APK Signature Scheme (v2/v3) schemes. v2 is
+            // sufficient for Android 7+, but enabling v1 as well maximises compatibility with
+            // OEM package installers that still validate the legacy JAR signature, which is one
+            // of the common causes of a misleading "App not installed" message.
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
 

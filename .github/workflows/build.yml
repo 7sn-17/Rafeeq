@@ -33,8 +33,11 @@ jobs:
       - name: Verify Keystore
         run: keytool -list -keystore release.p12 -storepass hasan3522 -alias rafeeq
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug
+      # A release APK (non-debuggable) is the correct distributable artefact. Debuggable APKs are
+      # rejected by several OEM package installers (MIUI/HyperOS, ColorOS, EMUI, ...) with a
+      # misleading "App not installed" message, so the published file is built as release.
+      - name: Build release APK
+        run: ./gradlew assembleRelease
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -43,7 +46,7 @@ jobs:
 
       - name: Verify APK
         run: |
-          APK=app/build/outputs/apk/debug/app-debug.apk
+          APK=app/build/outputs/apk/release/app-release.apk
           ls -la "$APK"
           echo "Checking APK size (must be > 1MB)"
           SIZE=$(stat -c%s "$APK")
@@ -61,7 +64,13 @@ jobs:
             $BUILD_TOOLS/apksigner verify --print-certs "$APK" || exit 1
           fi
           if [ -f "$BUILD_TOOLS/aapt" ]; then
-            $BUILD_TOOLS/aapt dump badging "$APK" | head -5
+            BADGING=$($BUILD_TOOLS/aapt dump badging "$APK")
+            echo "$BADGING" | head -5
+            # Guard against accidentally publishing a debuggable build again.
+            if echo "$BADGING" | grep -q "application-debuggable"; then
+              echo "APK is debuggable; refusing to publish"
+              exit 1
+            fi
           fi
           echo "SHA-256: $(sha256sum "$APK" | cut -d' ' -f1)"
 
@@ -70,14 +79,14 @@ jobs:
           VERSION_NAME=$(grep -E "versionName" app/build.gradle.kts | sed -E 's/.*versionName\s*=\s*"([^"]+)".*/\1/')
           echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/Rafeeq_v$VERSION_NAME.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/Rafeeq_v$VERSION_NAME.apk
           ls -la dist/
         shell: bash
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
+          name: rafeeq-release-apk
           path: dist/Rafeeq_v${{ env.VERSION_NAME }}.apk
 
       - name: Create GitHub Release
@@ -85,5 +94,13 @@ jobs:
         with:
           tag_name: v${{ env.VERSION_NAME }}
           name: Rafeeq v${{ env.VERSION_NAME }}
-          body: ${{ github.event.head_commit.message }}
+          body: |
+            ${{ github.event.head_commit.message }}
+
+            ### التثبيت / Installation
+            - حمّل الملف `Rafeeq_v${{ env.VERSION_NAME }}.apk` من هذه الصفحة.
+            - إن ظهرت رسالة "لم يتم تثبيت التطبيق" فغالباً توجد نسخة قديمة موقّعة بمفتاح مختلف:
+              احذف النسخة القديمة من الإعدادات ثم ثبّت هذا الإصدار.
+            - هذا الإصدار موقّع بمفتاح PKCS12 ثابت وغير قابل للتصحيح (non-debuggable)، لذا
+              ستنجح التحديثات المستقبلية فوقه مباشرة.
           files: dist/Rafeeq_v${{ env.VERSION_NAME }}.apk

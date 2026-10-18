@@ -39,6 +39,9 @@ class RafeeqNotificationManager(context: Context) {
 
     private val appContext = context.applicationContext
 
+    /** Last progress percentage posted per task, used to throttle notification updates. */
+    private val lastProgressPercent = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
     /** Creates the two app channels. Safe to call repeatedly; existing channels are untouched. */
     fun ensureChannels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -85,7 +88,9 @@ class RafeeqNotificationManager(context: Context) {
         ensureChannels()
 
         val copy = describe(summary) ?: return false
-        val notificationId = TASK_NOTIFICATION_ID_BASE + (abs(summary.taskId.hashCode()) % 1000)
+        // A finished task supersedes any progress notification for the same task.
+        lastProgressPercent.remove(summary.taskId)
+        val notificationId = taskNotificationId(summary.taskId)
 
         val notification = NotificationCompat.Builder(appContext, TASKS_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
@@ -105,6 +110,91 @@ class RafeeqNotificationManager(context: Context) {
             false
         }
     }
+
+    /**
+     * Announces that [taskName] has started. Resets any progress previously recorded for the
+     * task so a re-run reports from zero again. Returns true only when it was actually shown.
+     */
+    fun notifyTaskStart(taskId: String, taskName: String): Boolean {
+        lastProgressPercent.remove(taskId)
+        if (!notificationsAllowed()) return false
+        ensureChannels()
+
+        val notification = NotificationCompat.Builder(appContext, TASKS_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(taskName)
+            .setContentText("جاري التنفيذ...")
+            .setProgress(0, 0, true)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(openAppIntent(taskId.hashCode()))
+            .build()
+
+        return post(taskId, notification, "start")
+    }
+
+    /**
+     * Updates the progress notification for [taskId]. Reports are throttled to at most one per
+     * [PROGRESS_STEP_PERCENT] points so a large batch does not flood the notification shade.
+     */
+    fun notifyTaskProgress(taskId: String, taskName: String, done: Int, total: Int): Boolean {
+        if (total <= 0) return false
+        if (!notificationsAllowed()) return false
+        val safeDone = done.coerceIn(0, total)
+        val percent = safeDone * 100 / total
+        if (!shouldPostProgress(taskId, percent)) return false
+        ensureChannels()
+
+        val notification = NotificationCompat.Builder(appContext, TASKS_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("جاري $taskName")
+            .setContentText("تم إنجاز $safeDone من $total")
+            .setProgress(total, safeDone, false)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(openAppIntent(taskId.hashCode()))
+            .build()
+
+        return post(taskId, notification, "progress")
+    }
+
+    /**
+     * Removes any progress/completion notification for [taskId]. Used when an operation finishes
+     * with nothing to report, so an ongoing progress notification is not left behind.
+     */
+    fun cancelTask(taskId: String) {
+        lastProgressPercent.remove(taskId)
+        try {
+            NotificationManagerCompat.from(appContext).cancel(taskNotificationId(taskId))
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not cancel the task notification", e)
+        }
+    }
+
+    private fun post(taskId: String, notification: android.app.Notification, kind: String): Boolean =
+        try {
+            NotificationManagerCompat.from(appContext).notify(taskNotificationId(taskId), notification)
+            true
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Could not post $kind notification", e)
+            false
+        }
+
+    private fun shouldPostProgress(taskId: String, percent: Int): Boolean {
+        val previous = lastProgressPercent[taskId]
+        if (previous != null && percent < 100 && percent - previous < PROGRESS_STEP_PERCENT) {
+            return false
+        }
+        lastProgressPercent[taskId] = percent
+        return true
+    }
+
+    private fun taskNotificationId(taskId: String): Int =
+        TASK_NOTIFICATION_ID_BASE + (abs(taskId.hashCode()) % 1000)
 
     /** True only when notification permission is granted and neither the app nor the channel is off. */
     private fun notificationsAllowed(): Boolean {
@@ -180,5 +270,8 @@ class RafeeqNotificationManager(context: Context) {
         const val TASKS_CHANNEL_ID = "rafeeq_tasks_channel"
 
         private const val TASK_NOTIFICATION_ID_BASE = 2000
+
+        /** Minimum percentage change between two progress notifications for the same task. */
+        private const val PROGRESS_STEP_PERCENT = 10
     }
 }

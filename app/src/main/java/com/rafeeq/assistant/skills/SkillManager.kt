@@ -383,6 +383,7 @@ class SkillManager(
 
         // A successful query is not the same as successful organization, so the counts are
         // reported from the verified result rather than assumed.
+        return when {
             summary.found == 0 -> SkillResult.success("لم يتم العثور على صور جديدة لتنظيمها.")
             summary.moved == summary.found ->
                 SkillResult.success("تم تنظيم ${summary.moved} صورة بنجاح.")

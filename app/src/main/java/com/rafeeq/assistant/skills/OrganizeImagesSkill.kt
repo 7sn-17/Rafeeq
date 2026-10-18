@@ -38,6 +38,18 @@ class OrganizeImagesSkill(context: Context) {
     var progressCallback: ((ProcessingState, Map<String, String>) -> Unit)? = null
 
     /**
+     * Live counts from the most recent [execute] run. They let a cancelled run report its real
+     * partial outcome instead of a guess.
+     */
+    @Volatile
+    var lastFoundCount: Int = 0
+        private set
+
+    @Volatile
+    var lastMovedCount: Int = 0
+        private set
+
+    /**
      * Counts the images [execute] would touch, without modifying anything. Lets the caller ask
      * for consent before a bulk operation starts.
      */
@@ -54,6 +66,8 @@ class OrganizeImagesSkill(context: Context) {
     }
 
     suspend fun execute(sortBy: String = SORT_BY_DATE): OrganizeSummary = withContext(Dispatchers.IO) {
+        lastFoundCount = 0
+        lastMovedCount = 0
         progressCallback?.invoke(ProcessingState.SEARCHING_FILES, emptyMap())
         if (!hasMediaReadPermission()) {
             Log.w(TAG, "Media read permission is not granted; skipping image organization")
@@ -70,10 +84,11 @@ class OrganizeImagesSkill(context: Context) {
             return@withContext OrganizeSummary(found = 0, moved = 0)
         }
 
+        lastFoundCount = images.size
         if (images.isNotEmpty()) {
             progressCallback?.invoke(
                 ProcessingState.MOVING_FILES,
-                mapOf("count" to images.size.toString())
+                mapOf("count" to images.size.toString(), "moved" to "0")
             )
         }
 
@@ -82,6 +97,7 @@ class OrganizeImagesSkill(context: Context) {
             try {
                 if (moveImage(image, targetFolderFor(image, sortBy))) {
                     movedCount++
+                    lastMovedCount = movedCount
                 }
             } catch (e: CancellationException) {
                 throw e

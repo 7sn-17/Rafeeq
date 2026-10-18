@@ -30,6 +30,7 @@ class RafeeqWidgetProvider : AppWidgetProvider() {
             val views = RemoteViews(context.packageName, R.layout.widget_rafeeq)
             val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(MainActivity.EXTRA_START_LISTENING, true)
             }
             val pendingIntent = PendingIntent.getActivity(
                 context,

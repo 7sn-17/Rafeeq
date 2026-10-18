@@ -4,6 +4,7 @@ import android.content.Context
 import com.rafeeq.assistant.ai.AiService
 import com.rafeeq.assistant.ai.AssistantRequest
 import com.rafeeq.assistant.ai.ChatMessageDto
+import com.rafeeq.assistant.notifications.RafeeqNotificationManager
 import com.rafeeq.assistant.permissions.PermissionsManager
 import com.rafeeq.assistant.skills.CommunicationSkill
 import com.rafeeq.assistant.skills.DeviceSettingsSkill
@@ -14,9 +15,12 @@ import com.rafeeq.assistant.skills.SystemControlSkill
 import com.rafeeq.assistant.tts.TtsManager
 import com.rafeeq.assistant.tts.TtsVoice
 import com.rafeeq.assistant.voice.VoiceRecognitionManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,12 +32,22 @@ enum class AssistantState {
     IDLE,
     LISTENING,
     PROCESSING,
+    SPEAKING,
     ANALYZING,
     SEARCHING_FILES,
     MOVING_FILES,
     COMPLETED,
     ERROR
 }
+
+/**
+ * A one-shot speech-recognition result waiting to be merged into the input field. The UI
+ * consumes it by id so the same phrase is never appended twice.
+ */
+data class TranscriptionEvent(
+    val id: Long,
+    val text: String
+)
 
 /** How a chat entry should be rendered: a normal bubble, or a quieter system line. */
 enum class MessageRole {
@@ -57,12 +71,14 @@ class AssistantEngine(private val context: Context) {
     private val communicationSkill = CommunicationSkill(context, permissionsManager)
     private val deviceSettingsSkill = DeviceSettingsSkill(context, permissionsManager)
     private val systemControlSkill = SystemControlSkill(context)
+    private val notificationManager = RafeeqNotificationManager(context)
     private val skillManager = SkillManager(
         organizeImagesSkill = organizeImagesSkill,
         communicationSkill = communicationSkill,
         deviceSettingsSkill = deviceSettingsSkill,
         systemControlSkill = systemControlSkill,
-        permissionsManager = permissionsManager
+        permissionsManager = permissionsManager,
+        notificationManager = notificationManager
     )
     private val ttsManager = TtsManager(context)
 
@@ -82,6 +98,33 @@ class AssistantEngine(private val context: Context) {
     val errorMessage: StateFlow<String> = _errorMessage.asStateFlow()
 
     /**
+     * Speech results waiting to be appended to the input field. Unlike the old behaviour the
+     * transcript is not auto-sent, so it can be merged with any text the user already typed.
+     */
+    private val _transcription = MutableStateFlow<TranscriptionEvent?>(null)
+    val transcription: StateFlow<TranscriptionEvent?> = _transcription.asStateFlow()
+    private var transcriptionSequence = 0L
+
+    /** Non-null while a cancelled request should give the user their text back. */
+    private val _restoreInput = MutableStateFlow<String?>(null)
+    val restoreInput: StateFlow<String?> = _restoreInput.asStateFlow()
+
+    /** True while text-to-speech is actually playing. */
+    val isSpeaking: StateFlow<Boolean> = ttsManager.isSpeaking
+
+    /** The cancellable job for the request currently being processed. */
+    private var processingJob: Job? = null
+
+    /**
+     * Increments on every new request. A coroutine only publishes its result when its own
+     * sequence is still the newest, so a cancelled request can never overwrite newer state.
+     */
+    private var requestSequence = 0L
+
+    /** The text of the request in flight, so it can be restored after a cancellation. */
+    private var inFlightText: String? = null
+
+    /**
      * A short-lived, human readable progress line ("جاري تحليل الطلب...", ...). It is cleared
      * as soon as the final answer arrives, so it never lingers in the conversation history.
      */
@@ -97,9 +140,17 @@ class AssistantEngine(private val context: Context) {
     var audioPermissionRequester: ((String) -> Unit)? = null
 
     init {
+        // Channels must exist before any notification (service or task result) is posted.
+        notificationManager.ensureChannels()
         scope.launch {
             voiceRecognitionManager.recognizedText.collect { speech ->
-                handleUserSpeech(speech)
+                // Recognized speech is offered to the input field for merging instead of being
+                // sent immediately, so it never overwrites text the user already typed.
+                if (_state.value == AssistantState.LISTENING) {
+                    _recognizedText.value = speech
+                    _transcription.value = TranscriptionEvent(++transcriptionSequence, speech)
+                    _state.value = AssistantState.IDLE
+                }
             }
         }
         scope.launch {
@@ -137,7 +188,8 @@ class AssistantEngine(private val context: Context) {
 
     /**
      * Sends [text] through exactly the same pipeline as a spoken utterance, so typed and
-     * voiced commands behave identically.
+     * voiced commands behave identically. The request is retained as a [Job] so the Stop
+     * control can cancel the real in-flight operation.
      */
     fun sendText(text: String) {
         val trimmed = text.trim()
@@ -145,11 +197,58 @@ class AssistantEngine(private val context: Context) {
         if (_state.value == AssistantState.PROCESSING || _state.value == AssistantState.ANALYZING) {
             return
         }
-        scope.launch { handleUserSpeech(trimmed) }
+        startRequest(trimmed)
+    }
+
+    private fun startRequest(text: String) {
+        processingJob?.cancel()
+        val sequence = ++requestSequence
+        inFlightText = text
+        _restoreInput.value = null
+        processingJob = scope.launch {
+            handleUserSpeech(text, sequence)
+        }
+    }
+
+    /**
+     * Cancels the operation currently in flight (network call / skill work), stops any speech
+     * belonging to it, and gives the user's text back. It never reports the cancellation as a
+     * successful AI response.
+     */
+    fun cancelProcessing() {
+        val job = processingJob
+        if (job == null || !job.isActive) return
+        // Bump the sequence first so the cancelled coroutine cannot publish a late result.
+        requestSequence++
+        job.cancel(CancellationException("cancelled by user"))
+        processingJob = null
+        ttsManager.stop()
+        _statusText.value = null
+        _state.value = AssistantState.IDLE
+        _restoreInput.value = inFlightText
+    }
+
+    /** Called by the UI once the restored text has been placed back in the input field. */
+    fun consumeRestoreInput() {
+        _restoreInput.value = null
+    }
+
+    /** Called by the UI once a transcription has been merged into the input field. */
+    fun consumeTranscription(id: Long) {
+        if (_transcription.value?.id == id) {
+            _transcription.value = null
+        }
     }
 
     /** Wipes the visible conversation. */
     fun clearHistory() {
+        processingJob?.cancel()
+        processingJob = null
+        requestSequence++
+        inFlightText = null
+        _restoreInput.value = null
+        _transcription.value = null
+        ttsManager.stop()
         _messages.value = emptyList()
         _errorMessage.value = ""
         _responseText.value = ""
@@ -182,7 +281,7 @@ class AssistantEngine(private val context: Context) {
         onPermissionResult(mapOf(permission to isGranted))
     }
 
-    private suspend fun handleUserSpeech(speech: String) {
+    private suspend fun handleUserSpeech(speech: String, sequence: Long) {
         _recognizedText.value = speech
         addMessage(ChatMessage(speech, isUser = true))
         _state.value = AssistantState.PROCESSING
@@ -190,13 +289,21 @@ class AssistantEngine(private val context: Context) {
 
         try {
             val request = aiService.interpret(conversationHistory())
-            respond(request)
+            respondTo(request, sequence)
+        } catch (e: CancellationException) {
+            // Never swallow cancellation, and never report it as a normal response.
+            throw e
         } catch (e: Exception) {
-            respond(SkillResult("عذراً، حدث خطأ غير متوقع", success = false))
+            publishResult(SkillResult("عذراً، حدث خطأ غير متوقع", success = false), sequence)
         } finally {
-            _statusText.value = null
+            if (isCurrent(sequence)) {
+                _statusText.value = null
+            }
         }
     }
+
+    /** True while [sequence] is still the freshest request, i.e. no newer one superseded it. */
+    private fun isCurrent(sequence: Long): Boolean = requestSequence == sequence
 
     /**
      * Builds the context window handed to Groq: the last [CONTEXT_WINDOW_MESSAGES] real turns,
@@ -219,7 +326,7 @@ class AssistantEngine(private val context: Context) {
         _messages.value = _messages.value + message
     }
 
-    private suspend fun respond(request: AssistantRequest) {
+    private suspend fun respondTo(request: AssistantRequest, sequence: Long) {
         when (request) {
             is AssistantRequest.CallFunction -> {
                 _statusText.value = STATUS_EXECUTING
@@ -233,16 +340,18 @@ class AssistantEngine(private val context: Context) {
                 )
                 try {
                     val result = skillManager.handleFunction(request.name, request.args)
-                    respond(result)
+                    publishResult(result, sequence)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    respond(SkillResult("عذراً، تعذّر تنفيذ الأمر", success = false))
+                    publishResult(SkillResult("عذراً، تعذّر تنفيذ الأمر", success = false), sequence)
                 }
             }
             is AssistantRequest.Talk -> {
-                respond(SkillResult(request.text, success = true))
+                publishResult(SkillResult(request.text, success = true), sequence)
             }
             is AssistantRequest.Unknown -> {
-                respond(SkillResult("عذراً، لم أفهم طلبك", success = false))
+                publishResult(SkillResult("عذراً، لم أفهم طلبك", success = false), sequence)
             }
         }
     }
@@ -282,13 +391,14 @@ class AssistantEngine(private val context: Context) {
         _messages.value = _messages.value + ChatMessage(message, isUser = false)
     }
 
-    private fun respond(result: SkillResult) {
+    private fun publishResult(result: SkillResult, sequence: Long) {
+        // A superseded or cancelled request must never overwrite newer chat state.
+        if (!isCurrent(sequence)) return
         _statusText.value = null
         _responseText.value = result.message
         _state.value = AssistantState.COMPLETED
         addMessage(ChatMessage(result.message, isUser = false))
         ttsManager.speak(result.message)
-        // Reset to idle after a short delay conceptually - let UI decide
     }
 
     private fun handleRecognitionFailure() {
@@ -297,6 +407,11 @@ class AssistantEngine(private val context: Context) {
         _state.value = AssistantState.ERROR
         _errorMessage.value = "عذراً، لم أتمكن من الاستماع"
         _messages.value = _messages.value + ChatMessage(_errorMessage.value, isUser = false)
+    }
+
+    /** Stops any speech currently playing; used by the Stop control and on teardown. */
+    fun stopSpeaking() {
+        ttsManager.stop()
     }
 
     fun setPermissionRequester(requester: (String) -> Unit) {
@@ -314,6 +429,9 @@ class AssistantEngine(private val context: Context) {
     }
 
     fun destroy() {
+        processingJob?.cancel()
+        processingJob = null
+        scope.cancel()
         voiceRecognitionManager.destroy()
         ttsManager.shutdown()
         skillManager.dispose()

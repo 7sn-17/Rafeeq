@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.rafeeq.assistant.core.AssistantEngine
 import com.rafeeq.assistant.core.AssistantState
 import com.rafeeq.assistant.core.ChatMessage
+import com.rafeeq.assistant.core.TranscriptionEvent
 import com.rafeeq.assistant.skills.PendingConfirmation
 import com.rafeeq.assistant.skills.PendingPermissionRequest
 import com.rafeeq.assistant.tts.TtsVoice
@@ -33,6 +34,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val errorMessage: StateFlow<String> = engine.errorMessage
     val statusText: StateFlow<String?> = engine.statusText
     val ttsMuted: StateFlow<Boolean> = engine.ttsMuted
+    val isSpeaking: StateFlow<Boolean> = engine.isSpeaking
+    val transcription: StateFlow<TranscriptionEvent?> = engine.transcription
+    val restoreInput: StateFlow<String?> = engine.restoreInput
 
     private val _themeMode = MutableStateFlow(loadThemeMode())
     val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
@@ -68,8 +72,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Starts the permission-aware listening flow (used by the tile/widget hand-off). */
+    fun startListening() {
+        engine.startListening()
+    }
+
     fun sendText(text: String) {
         engine.sendText(text)
+    }
+
+    /** Cancels the actual in-flight request behind the Stop control. */
+    fun cancelProcessing() {
+        engine.cancelProcessing()
+    }
+
+    /** Stops any speech currently playing. */
+    fun stopSpeaking() {
+        engine.stopSpeaking()
+    }
+
+    fun consumeTranscription(id: Long) {
+        engine.consumeTranscription(id)
+    }
+
+    fun consumeRestoreInput() {
+        engine.consumeRestoreInput()
     }
 
     fun newChat() {

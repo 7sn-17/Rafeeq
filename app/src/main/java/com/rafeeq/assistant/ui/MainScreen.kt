@@ -31,12 +31,14 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -70,6 +72,8 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -79,6 +83,7 @@ import com.rafeeq.assistant.R
 import com.rafeeq.assistant.core.AssistantState
 import com.rafeeq.assistant.core.ChatMessage
 import com.rafeeq.assistant.core.MessageRole
+import com.rafeeq.assistant.core.TranscriptionEvent
 import com.rafeeq.assistant.skills.PendingConfirmation
 import com.rafeeq.assistant.skills.PendingPermissionRequest
 import com.rafeeq.assistant.ui.theme.rafeeqHeaderGradient
@@ -93,12 +98,18 @@ fun MainScreen(
     ttsMuted: Boolean,
     pendingPermission: PendingPermissionRequest? = null,
     pendingConfirmation: PendingConfirmation? = null,
+    isSpeaking: Boolean = false,
+    transcription: TranscriptionEvent? = null,
+    restoreInput: String? = null,
     onSendText: (String) -> Unit,
     onToggleMic: () -> Unit,
+    onCancelProcessing: () -> Unit = {},
     onToggleMute: () -> Unit,
     onNewChat: () -> Unit,
     onClearHistory: () -> Unit,
     onOpenSettings: () -> Unit,
+    onTranscriptionConsumed: (Long) -> Unit = {},
+    onRestoreInputConsumed: () -> Unit = {},
     onPermissionShown: (String) -> Unit = {},
     onPermissionResult: (Map<String, Boolean>) -> Unit = {},
     onConfirmationResult: (String, Boolean) -> Unit = { _, _ -> },
@@ -152,10 +163,15 @@ fun MainScreen(
             )
 
             InputBar(
-                isRecording = state == AssistantState.LISTENING,
-                isBusy = state == AssistantState.PROCESSING || state == AssistantState.ANALYZING,
+                state = state,
+                isSpeaking = isSpeaking,
+                transcription = transcription,
+                restoreInput = restoreInput,
                 onSendText = onSendText,
-                onToggleMic = onToggleMic
+                onToggleMic = onToggleMic,
+                onCancelProcessing = onCancelProcessing,
+                onTranscriptionConsumed = onTranscriptionConsumed,
+                onRestoreInputConsumed = onRestoreInputConsumed
             )
         }
     }
@@ -378,69 +394,160 @@ private fun BouncingDots() {
     }
 }
 
+/**
+ * Material 3 input bar with Arabic RTL layout, a multiline field, a microphone control and a
+ * send control that becomes a real Stop control while a request is processing.
+ *
+ * Speech results are merged into the field instead of replacing it: the recognized phrase is
+ * appended once, and the final result is never appended twice.
+ */
 @Composable
 private fun InputBar(
-    isRecording: Boolean,
-    isBusy: Boolean,
+    state: AssistantState,
+    isSpeaking: Boolean,
+    transcription: TranscriptionEvent?,
+    restoreInput: String?,
     onSendText: (String) -> Unit,
-    onToggleMic: () -> Unit
+    onToggleMic: () -> Unit,
+    onCancelProcessing: () -> Unit,
+    onTranscriptionConsumed: (Long) -> Unit,
+    onRestoreInputConsumed: () -> Unit
 ) {
     var text by rememberSaveable { mutableStateOf("") }
-    val canSend = text.isNotBlank() && !isBusy
+    var lastTranscriptionId by rememberSaveable { mutableStateOf(-1L) }
+
+    val isListening = state == AssistantState.LISTENING
+    val isProcessing = state == AssistantState.PROCESSING || state == AssistantState.ANALYZING
+    val canSend = text.isNotBlank() && !isProcessing
+
+    // Merge a finalized recognition result into the current value, never a stale capture.
+    LaunchedEffect(transcription?.id) {
+        val event = transcription ?: return@LaunchedEffect
+        if (event.id == lastTranscriptionId) return@LaunchedEffect
+        lastTranscriptionId = event.id
+        text = mergeTranscription(text, event.text)
+        onTranscriptionConsumed(event.id)
+    }
+
+    // Give the user their text back when a request is cancelled.
+    LaunchedEffect(restoreInput) {
+        val restored = restoreInput ?: return@LaunchedEffect
+        text = restored
+        onRestoreInputConsumed()
+    }
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
         tonalElevation = 3.dp,
         shadowElevation = 8.dp
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .imePadding()
                 .padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("اكتب رسالتك هنا...") },
-                shape = RoundedCornerShape(24.dp),
-                maxLines = 4
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            MicButton(
-                isRecording = isRecording,
-                isBusy = isBusy,
-                onClick = onToggleMic
-            )
-
-            Spacer(modifier = Modifier.width(4.dp))
-
-            IconButton(
-                enabled = canSend,
-                onClick = {
-                    if (canSend) {
-                        onSendText(text)
-                        text = ""
-                    }
-                }
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Send,
-                    contentDescription = "إرسال",
-                    tint = if (canSend) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
-                    }
+            // The waveform is a listening indicator only; the microphone state controls it.
+            if (isListening) {
+                VoiceWaveform(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(28.dp)
+                        .semantics { contentDescription = "جارٍ الاستماع" },
+                    isAnimating = true
                 )
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+
+            if (isSpeaking) {
+                Text(
+                    text = "يتحدث رفيق...",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics { contentDescription = "حقل الرسالة" },
+                    placeholder = { Text("اكتب رسالتك هنا...") },
+                    shape = RoundedCornerShape(24.dp),
+                    maxLines = 4
+                )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                if (isProcessing) {
+                    // Stop replaces the microphone and cancels the real in-flight operation.
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.error)
+                            .clickable(onClick = onCancelProcessing)
+                            .semantics { contentDescription = "إيقاف المعالجة" },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                } else {
+                    MicButton(
+                        isRecording = isListening,
+                        isBusy = false,
+                        onClick = onToggleMic
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
+
+                IconButton(
+                    enabled = canSend,
+                    onClick = {
+                        if (canSend) {
+                            onSendText(text)
+                            text = ""
+                        }
+                    },
+                    modifier = Modifier.semantics { contentDescription = "إرسال" }
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Send,
+                        contentDescription = null,
+                        tint = if (canSend) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+                        }
+                    )
+                }
             }
         }
     }
+}
+
+/**
+ * Deterministic merge of a recognized phrase into the current input value:
+ * trims the phrase, adds a separator only when needed, and never duplicates a phrase that is
+ * already at the end of the value.
+ */
+internal fun mergeTranscription(current: String, phrase: String): String {
+    val trimmed = phrase.trim()
+    if (trimmed.isEmpty()) return current
+    if (current.isBlank()) return trimmed
+    if (current.trimEnd().endsWith(trimmed)) return current
+    val separator = if (current.last().isWhitespace()) "" else " "
+    return current + separator + trimmed
 }
 
 /** Mic toggle; pulses red while a recording is in progress. */
@@ -467,12 +574,15 @@ private fun MicButton(
             .scale(pulse)
             .clip(CircleShape)
             .background(if (isRecording) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary)
-            .clickable(enabled = !isBusy, onClick = onClick),
+            .clickable(enabled = !isBusy, onClick = onClick)
+            .semantics {
+                contentDescription = if (isRecording) "إيقاف الاستماع" else "بدء الاستماع"
+            },
         contentAlignment = Alignment.Center
     ) {
         Icon(
             painter = painterResource(id = R.drawable.ic_mic),
-            contentDescription = if (isRecording) "إيقاف التسجيل" else "بدء التسجيل",
+            contentDescription = null,
             tint = Color.White,
             modifier = Modifier.size(22.dp)
         )

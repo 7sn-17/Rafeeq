@@ -1,6 +1,8 @@
 package com.rafeeq.assistant.skills
 
 import android.util.Log
+import com.rafeeq.assistant.notifications.BackgroundTaskSummary
+import com.rafeeq.assistant.notifications.RafeeqNotificationManager
 import com.rafeeq.assistant.permissions.PermissionsManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -98,7 +100,8 @@ class SkillManager(
     private val communicationSkill: CommunicationSkill,
     private val deviceSettingsSkill: DeviceSettingsSkill,
     private val systemControlSkill: SystemControlSkill,
-    private val permissionsManager: PermissionsManager
+    private val permissionsManager: PermissionsManager,
+    private val notificationManager: RafeeqNotificationManager? = null
 ) {
     private val scope = CoroutineScope(Dispatchers.Main.immediate)
 
@@ -348,15 +351,38 @@ class SkillManager(
         val summary = try {
             organizeImagesSkill.execute(sortBy)
         } catch (e: CancellationException) {
+            // Report the real partial outcome before propagating the cancellation.
+            val movedSoFar = organizeImagesSkill.lastMovedCount
+            val foundSoFar = organizeImagesSkill.lastFoundCount
+            notificationManager?.notifyTaskCompletion(
+                BackgroundTaskSummary(
+                    taskId = TASK_ID_ORGANIZE_IMAGES,
+                    taskName = "تنظيم الصور",
+                    succeeded = movedSoFar,
+                    failed = (foundSoFar - movedSoFar).coerceAtLeast(0),
+                    canceled = true
+                )
+            )
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "OrganizeImagesSkill failed", e)
             return SkillResult.failure("تعذّر تنظيم الصور.")
         }
 
+        // Notify only after the operation reached a verified completion state.
+        if (summary.found > 0) {
+            notificationManager?.notifyTaskCompletion(
+                BackgroundTaskSummary(
+                    taskId = TASK_ID_ORGANIZE_IMAGES,
+                    taskName = "تنظيم الصور",
+                    succeeded = summary.moved,
+                    failed = (summary.found - summary.moved).coerceAtLeast(0)
+                )
+            )
+        }
+
         // A successful query is not the same as successful organization, so the counts are
         // reported from the verified result rather than assumed.
-        return when {
             summary.found == 0 -> SkillResult.success("لم يتم العثور على صور جديدة لتنظيمها.")
             summary.moved == summary.found ->
                 SkillResult.success("تم تنظيم ${summary.moved} صورة بنجاح.")
@@ -386,5 +412,8 @@ class SkillManager(
 
         /** Bulk operations at or above this size ask for explicit consent first. */
         const val CONFIRMATION_THRESHOLD = 10
+
+        /** Stable task id so repeated organize runs replace the same notification. */
+        const val TASK_ID_ORGANIZE_IMAGES = "organizeImages"
     }
 }

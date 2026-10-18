@@ -30,26 +30,11 @@
             <action android:name="android.intent.action.SENDTO" />
             <data android:scheme="smsto" />
         </intent>
-        <intent>
-            <action android:name="android.intent.action.MAIN" />
-            <category android:name="android.intent.category.LAUNCHER" />
-        </intent>
-        <intent>
-            <action android:name="android.settings.WIFI_SETTINGS" />
-        </intent>
-        <intent>
-            <action android:name="android.settings.BLUETOOTH_SETTINGS" />
-        </intent>
         <package android:name="com.whatsapp" />
         <package android:name="com.whatsapp.w4b" />
     </queries>
 
     <application
-                <service
-            android:name=".service.RafeeqBackgroundService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="microphone" />
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="رفيق"
@@ -57,7 +42,22 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Rafeeq">
 
-            <service
+        <service
+            android:name=".service.RafeeqBackgroundService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <service
             android:name=".tile.RafeeqTileService"
             android:exported="true"
             android:icon="@drawable/ic_mic"
@@ -66,11 +66,9 @@
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
-            <meta-data
-                android:name="android.service.quicksettings.ACTIVE_TILE"
-                android:value="false" />
         </service>
-                    <receiver
+
+        <receiver
             android:name=".widget.RafeeqWidgetProvider"
             android:exported="true">
             <intent-filter>
@@ -80,6 +78,7 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/rafeeq_widget_info" />
         </receiver>
+
     </application>
 
 </manifest>

@@ -31,6 +31,14 @@ import com.rafeeq.assistant.ui.theme.RafeeqTheme
 class MainActivity : ComponentActivity() {
     private val mainViewModel: MainViewModel by viewModels()
 
+    companion object {
+        /**
+         * Set by the Quick Settings tile and the home-screen widget. Listening still starts
+         * only through the foreground, permission-aware flow; this is just a hand-off hint.
+         */
+        const val EXTRA_START_LISTENING = "com.rafeeq.assistant.EXTRA_START_LISTENING"
+    }
+
     private val audioPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -106,19 +114,29 @@ class MainActivity : ComponentActivity() {
                         val pendingPermission by mainViewModel.pendingPermissionRequest.collectAsStateWithLifecycle()
                         val pendingConfirmation by mainViewModel.pendingConfirmation.collectAsStateWithLifecycle()
 
+                        val transcription by mainViewModel.transcription.collectAsStateWithLifecycle()
+                        val restoreInput by mainViewModel.restoreInput.collectAsStateWithLifecycle()
+                        val isSpeaking by mainViewModel.isSpeaking.collectAsStateWithLifecycle()
+
                         MainScreen(
                             state = state,
                             messages = messages,
                             statusText = statusText,
                             ttsMuted = ttsMuted,
+                            isSpeaking = isSpeaking,
+                            transcription = transcription,
+                            restoreInput = restoreInput,
                             pendingPermission = pendingPermission,
                             pendingConfirmation = pendingConfirmation,
                             onSendText = mainViewModel::sendText,
                             onToggleMic = mainViewModel::toggleRecording,
+                            onCancelProcessing = mainViewModel::cancelProcessing,
                             onToggleMute = mainViewModel::toggleTtsMuted,
                             onNewChat = mainViewModel::newChat,
                             onClearHistory = mainViewModel::clearHistory,
                             onOpenSettings = { showSettings = true },
+                            onTranscriptionConsumed = mainViewModel::consumeTranscription,
+                            onRestoreInputConsumed = mainViewModel::consumeRestoreInput,
                             onPermissionShown = mainViewModel::onPermissionDialogShown,
                             onPermissionResult = mainViewModel::onPermissionResult,
                             onConfirmationResult = mainViewModel::onConfirmationResult
@@ -126,6 +144,25 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+
+        handleStartListeningIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleStartListeningIntent(intent)
+    }
+
+    /**
+     * The tile and widget open the app with a hint flag. Listening still starts only through
+     * the existing permission-aware flow: [MainViewModel.startListening] requests RECORD_AUDIO
+     * when it has not been granted yet.
+     */
+    private fun handleStartListeningIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_START_LISTENING, false) == true) {
+            mainViewModel.startListening()
         }
     }
 

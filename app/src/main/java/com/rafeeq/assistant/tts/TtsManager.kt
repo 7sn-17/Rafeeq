@@ -2,6 +2,7 @@ package com.rafeeq.assistant.tts
 
 import android.content.Context
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,6 +37,10 @@ class TtsManager(context: Context) {
 
     private val _muted = MutableStateFlow(false)
     val muted: StateFlow<Boolean> = _muted.asStateFlow()
+
+    /** True only while an utterance is actually being played, so the UI can show SPEAKING. */
+    private val _isSpeaking = MutableStateFlow(false)
+    val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
 
     /** Bumped once the engine has finished initialising, so installed voices can be listed. */
     private val _readyTick = MutableStateFlow(0)
@@ -88,6 +93,7 @@ class TtsManager(context: Context) {
     /** Stops any in-flight utterance. */
     fun stop() {
         textToSpeech?.stop()
+        _isSpeaking.value = false
     }
 
     /** Releases the engine; call from the owning ViewModel's onCleared. */
@@ -97,6 +103,7 @@ class TtsManager(context: Context) {
         textToSpeech?.stop()
         textToSpeech?.shutdown()
         textToSpeech = null
+        _isSpeaking.value = false
     }
 
     private fun handleInitialisation(status: Int) {
@@ -109,6 +116,7 @@ class TtsManager(context: Context) {
         _readyTick.value = _readyTick.value + 1
         val engine = textToSpeech ?: return
 
+        engine.setOnUtteranceProgressListener(progressListener)
         applyArabicLanguage(engine)
         applyVoice(engine)
         pendingUtterance?.let { utterance ->
@@ -120,8 +128,34 @@ class TtsManager(context: Context) {
     private fun speakNow(engine: TextToSpeech, text: String) {
         if (_muted.value) return
         val result = engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE_ID)
-        if (result != TextToSpeech.SUCCESS) {
+        if (result == TextToSpeech.SUCCESS) {
+            _isSpeaking.value = true
+        } else {
             Log.w(TAG, "Could not speak: $text")
+        }
+    }
+
+    /** Keeps [isSpeaking] honest so the UI never claims speech that is not happening. */
+    private val progressListener = object : UtteranceProgressListener() {
+        override fun onStart(utteranceId: String?) {
+            _isSpeaking.value = true
+        }
+
+        override fun onDone(utteranceId: String?) {
+            _isSpeaking.value = false
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun onError(utteranceId: String?) {
+            _isSpeaking.value = false
+        }
+
+        override fun onError(utteranceId: String?, errorCode: Int) {
+            _isSpeaking.value = false
+        }
+
+        override fun onStop(utteranceId: String?, interrupted: Boolean) {
+            _isSpeaking.value = false
         }
     }
 

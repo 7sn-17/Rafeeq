@@ -12,8 +12,8 @@ android {
         applicationId = "com.rafeeq.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "0.6"
+        versionCode = 7
+        versionName = "0.7"
 
         // Injected from CI (GitHub Actions secret -> environment variable). Reading the key
         // from the environment rather than local.properties means a CI runner never needs a
@@ -27,6 +27,9 @@ android {
 
     signingConfigs {
         create("release") {
+            // The keystore is never committed (.gitignore excludes *.p12); CI decodes it from the
+            // KEYSTORE_BASE64 secret. Keeping this key stable across releases is what allows a
+            // newer build to be installed on top of an already installed copy.
             storeType = "PKCS12"
             storeFile = file("../release.p12")
             storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "hasan3522"
@@ -51,6 +54,10 @@ android {
         }
         release {
             isMinifyEnabled = false
+            // Explicitly non-debuggable: a debuggable APK is refused by several OEM package
+            // installers (MIUI/HyperOS, ColorOS, ...) with a misleading "App not installed"
+            // message. CI re-checks the published artefact for this.
+            isDebuggable = false
             signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

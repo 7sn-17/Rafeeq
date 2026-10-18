@@ -382,7 +382,7 @@ class SkillManager(
 
         organizeImagesSkill.progressCallback = { state, extra ->
             when (state) {
-                ProcessingState.SEARCHING_FILES ->
+                ProcessingState.ANALYZING, ProcessingState.SEARCHING_FILES ->
                     notificationManager?.notifyTaskStart(TASK_ID_ORGANIZE_IMAGES, "تنظيم الصور")
                 ProcessingState.MOVING_FILES -> {
                     val total = extra["count"]?.toIntOrNull() ?: 0
